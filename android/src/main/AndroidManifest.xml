@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Samsung Health SDK minSdk=29 override -->
+    <uses-sdk tools:overrideLibrary="com.samsung.android.sdk.health.data" />
+
+    <!-- 삼성헬스 패키지 가시성 (Android 11+) -->
+    <queries>
+        <package android:name="com.sec.android.app.shealth" />
+    </queries>
+</manifest>
