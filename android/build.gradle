@@ -25,6 +25,7 @@ allprojects {
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
 apply plugin: "kotlinx-serialization"
+apply plugin: "kotlin-parcelize"
 
 android {
     namespace = "com.diaconn.flutter_health"
@@ -51,7 +52,10 @@ android {
     }
 
     dependencies {
+        // Samsung Health SDK가 내부에서 @Parcelize 사용. AGP 9.2.0+에서 parcelize 플러그인이
+        // runtime jar를 자동 추가하지 않아 NoClassDefFoundError가 발생하므로 명시 선언한다.
         implementation(files("libs/samsung-health-data-api-1.1.0.aar"))
+        implementation("org.jetbrains.kotlin:kotlin-parcelize-runtime:$kotlin_version")
         implementation("com.google.code.gson:gson:2.11.0")
         implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
