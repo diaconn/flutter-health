@@ -126,6 +126,19 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }
             }
+            "queryLatestWeight" -> {
+                val since = call.argument<Number>("since")?.toLong()
+                val to = call.argument<Number>("to")?.toLong()
+                if (since == null || to == null) {
+                    result.error("INVALID_ARGS", "since and to are required", null)
+                    return
+                }
+                scope.launch {
+                    runCatching { client.queryLatestWeight(since, to)?.toMap() }
+                        .onSuccess { result.success(it) }
+                        .onFailure { result.error("QUERY_ERROR", it.message, null) }
+                }
+            }
             "queryDailySummary" -> {
                 val isoDate = call.argument<String>("date")
                 if (isoDate == null) {

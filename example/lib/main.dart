@@ -144,6 +144,21 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     }
   }
 
+  Future<void> _queryWeight() async {
+    final to    = DateTime.now();
+    final since = to.subtract(const Duration(days: 30));
+    try {
+      final record = await _plugin.queryLatestWeight(since, to);
+      if (record == null) {
+        _log('queryLatestWeight → null');
+      } else {
+        _log('weight ${_fmtMs(record.timestamp)}\n${_prettyJson(record.valueJson)}');
+      }
+    } catch (e) {
+      _log('queryLatestWeight error: $e');
+    }
+  }
+
   void _toggleLoop() {
     if (_loopRunning) {
       _loopTimer?.cancel();
@@ -227,6 +242,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
             onQueryExercise: _queryExercise,
             onQueryHourly: _queryHourly,
             onQueryDaily: _queryDaily,
+            onQueryWeight: _queryWeight,
             onToggleLoop: _toggleLoop,
           ),
           const Divider(height: 1),
@@ -278,7 +294,7 @@ class _ButtonGrid extends StatelessWidget {
   final bool available, connected, loopRunning;
   final VoidCallback onConnect, onRequestPermission;
   final VoidCallback onQueryMetric, onQuerySleep, onQueryExercise;
-  final VoidCallback onQueryHourly, onQueryDaily, onToggleLoop;
+  final VoidCallback onQueryHourly, onQueryDaily, onQueryWeight, onToggleLoop;
 
   const _ButtonGrid({
     required this.available,
@@ -291,6 +307,7 @@ class _ButtonGrid extends StatelessWidget {
     required this.onQueryExercise,
     required this.onQueryHourly,
     required this.onQueryDaily,
+    required this.onQueryWeight,
     required this.onToggleLoop,
   });
 
@@ -309,6 +326,7 @@ class _ButtonGrid extends StatelessWidget {
           OutlinedButton(onPressed: onQueryExercise, child: const Text('Exercise (1 day)')),
           OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')),
           OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary')),
+          OutlinedButton(onPressed: onQueryWeight, child: const Text('Latest Weight')),
           FilledButton.tonal(
             onPressed: onToggleLoop,
             child: Text(loopRunning ? 'Stop 5-min Loop' : 'Start 5-min Loop'),

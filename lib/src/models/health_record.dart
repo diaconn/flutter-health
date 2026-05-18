@@ -5,6 +5,7 @@ import 'sleep_value.dart';
 import 'exercise_value.dart';
 import 'hourly_summary_value.dart';
 import 'daily_summary_value.dart';
+import 'weight_value.dart';
 
 class HealthRecord {
   static const String typeMetric = 'metric';
@@ -12,6 +13,7 @@ class HealthRecord {
   static const String typeExercise = 'exercise';
   static const String typeHourlySummary = 'hourly_summary';
   static const String typeDailySummary = 'daily_summary';
+  static const String typeWeight = 'weight';
 
   final String dataType;
   final int timestamp;
@@ -55,6 +57,9 @@ class HealthRecord {
 
   DailySummaryValue? get asDailySummary =>
       dataType == typeDailySummary ? DailySummaryValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
+
+  WeightValue? get asWeight =>
+      dataType == typeWeight ? WeightValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
 
   @override
   String toString() => 'HealthRecord(dataType: $dataType, timestamp: $timestamp, source: $source)';

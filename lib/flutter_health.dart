@@ -4,6 +4,7 @@ export 'src/models/sleep_value.dart';
 export 'src/models/exercise_value.dart';
 export 'src/models/hourly_summary_value.dart';
 export 'src/models/daily_summary_value.dart';
+export 'src/models/weight_value.dart';
 
 import 'flutter_health_platform_interface.dart';
 import 'src/models/health_record.dart';
@@ -46,4 +47,9 @@ class FlutterHealth {
   /// [date] 하루의 일별 집계 (daily_summary) 레코드를 반환.
   Future<HealthRecord?> queryDailySummary(DateTime date) =>
       FlutterHealthPlatform.instance.queryDailySummary(date);
+
+  /// [since]~[to] 구간에서 가장 최근의 체중 (weight) 레코드를 반환.
+  /// 데이터 없으면 null.
+  Future<HealthRecord?> queryLatestWeight(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryLatestWeight(since, to);
 }

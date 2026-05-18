@@ -121,6 +121,20 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 }
             }
 
+        case "queryLatestWeight":
+            guard let args = call.arguments as? [String: Any],
+                  let sinceMs = args["since"] as? Int,
+                  let toMs    = args["to"]    as? Int else {
+                result(FlutterError(code: "INVALID_ARGS", message: "since/to required", details: nil))
+                return
+            }
+            let since = Date(timeIntervalSince1970: Double(sinceMs) / 1000.0)
+            let to    = Date(timeIntervalSince1970: Double(toMs)    / 1000.0)
+            Task {
+                let record = await client.queryLatestWeight(since: since, to: to)
+                DispatchQueue.main.async { result(record?.toDictionary()) }
+            }
+
         case "queryDailySummary":
             guard let args    = call.arguments as? [String: Any],
                   let dateStr = args["date"] as? String else {

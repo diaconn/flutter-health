@@ -42,7 +42,7 @@ android {
 
 ```xml
 <key>NSHealthShareUsageDescription</key>
-<string>심박수·걸음·수면·운동 데이터를 읽어 혈당 변화와의 상관관계를 분석합니다.</string>
+<string>심박수·걸음·수면·운동·체중 데이터를 읽어 혈당 변화와의 상관관계를 분석합니다.</string>
 ```
 
 2. `ios/Runner/Runner.entitlements` (없으면 생성)에 HealthKit 권한을 추가합니다.
@@ -102,6 +102,7 @@ if (record != null) {
 | `queryEndedExerciseSessions(since, to)` | 구간 내 종료된 운동 세션 목록 |
 | `queryHourlySummary(hourStart, hourEnd)` | 1시간 집계 (HR·걸음·칼로리·거리) |
 | `queryDailySummary(date)` | 1일 집계 (HR·걸음·칼로리·거리·수면·운동) |
+| `queryLatestWeight(since, to)` | 구간 내 가장 최근 체중 (weight·BMI·체지방률) |
 
 ---
 
@@ -111,7 +112,7 @@ if (record != null) {
 
 ```dart
 class HealthRecord {
-  final String dataType;    // "metric" | "sleep" | "exercise" | "hourly_summary" | "daily_summary"
+  final String dataType;    // "metric" | "sleep" | "exercise" | "hourly_summary" | "daily_summary" | "weight"
   final int timestamp;      // UTC epoch ms (구간 시작)
   final int endTimestamp;   // UTC epoch ms (구간 종료)
   final String tzOffset;    // "+09:00" 형식
@@ -129,6 +130,7 @@ record.asSleep          // SleepValue?
 record.asExercise       // ExerciseValue?
 record.asHourlySummary  // HourlySummaryValue?
 record.asDailySummary   // DailySummaryValue?
+record.asWeight         // WeightValue?
 ```
 
 ---
@@ -216,6 +218,7 @@ final sessions = await health.queryEndedSleepSessions(from, to);
 | 백그라운드 정확한 5분 루프 | WorkManager로 구현 가능 | OS 재량 (`BGAppRefreshTask`) — 정확도 보장 불가 |
 | 운동 `strength_training` | 삼성헬스 미지원 → `other` | `.traditionalStrengthTraining` 등 매핑 |
 | 거리 | 모든 활동 포함 | 걷기·달리기만 (`distanceWalkingRunning`) |
+| 체중 BMI / 체지방률 | BODY_COMPOSITION에 포함된 경우 동반 반환 | 항상 null (`.bodyMass`만 조회) |
 
 ---
 

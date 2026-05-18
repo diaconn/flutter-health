@@ -238,6 +238,31 @@ final class HealthKitClient {
         )
     }
 
+    func queryLatestWeight(since: Date, to: Date) async -> HealthRecord? {
+        guard let qt = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: qt, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
+            limit: 1
+        )
+        guard let sample = try? await descriptor.result(for: store).first else { return nil }
+        let kg = sample.quantity.doubleValue(for: weightUnit)
+        guard kg > 0 else { return nil }
+        // HealthKit의 .bodyMass 샘플에는 BMI/체지방률이 포함되지 않음.
+        // 별도 .bodyMassIndex / .bodyFatPercentage 쿼리가 필요해 의도적으로 nil 유지.
+        let value = WeightValue(weight: kg, bmi: nil, bodyFat: nil)
+        return HealthRecord(
+            dataType: Self.dataTypeWeight,
+            timestamp: toMs(sample.startDate),
+            endTimestamp: toMs(sample.endDate),
+            tzOffset: currentTzOffset(),
+            source: Self.source,
+            valueJson: encodeToJson(value),
+            createdAt: toMs(Date())
+        )
+    }
+
     // MARK: - Private
 
     private let store = HKHealthStore()
@@ -270,9 +295,12 @@ final class HealthKitClient {
         HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
         HKObjectType.quantityType(forIdentifier: .oxygenSaturation)!,
         HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
+        HKObjectType.quantityType(forIdentifier: .bodyMass)!,
         HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
         HKObjectType.workoutType()
     ]
+
+    private let weightUnit = HKUnit.gramUnit(with: .kilo)
 
     private func currentTzOffset() -> String {
         let seconds = TimeZone.current.secondsFromGMT()
@@ -475,6 +503,12 @@ final class HealthKitClient {
         let distanceTotalM: Double?
     }
 
+    fileprivate struct WeightValue: Codable {
+        let weight: Double
+        let bmi: Double?
+        let bodyFat: Double?
+    }
+
     private struct DailySummaryValue: Codable {
         let date: String
         let heartRateAvg: Int?
@@ -498,6 +532,7 @@ final class HealthKitClient {
     static let dataTypeExercise = "exercise"
     static let dataTypeHourlySummary = "hourly_summary"
     static let dataTypeDailySummary = "daily_summary"
+    static let dataTypeWeight = "weight"
     static let source = "apple_health"
 }
 

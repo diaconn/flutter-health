@@ -68,4 +68,13 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
         'queryDailySummary', {'date': date.toIso8601String().substring(0, 10)});
     return result == null ? null : HealthRecord.fromMap(result);
   }
+
+  @override
+  Future<HealthRecord?> queryLatestWeight(DateTime since, DateTime to) async {
+    final result = await methodChannel.invokeMethod<Map>('queryLatestWeight', {
+      'since': since.millisecondsSinceEpoch,
+      'to': to.millisecondsSinceEpoch,
+    });
+    return result == null ? null : HealthRecord.fromMap(result);
+  }
 }

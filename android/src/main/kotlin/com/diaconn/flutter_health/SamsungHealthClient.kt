@@ -262,6 +262,47 @@ class SamsungHealthClient(private val context: Context) {
         )
     }
 
+    /**
+     * [since]~[to] 구간에서 가장 최근의 체중(BODY_COMPOSITION) 레코드를 반환한다.
+     * 데이터가 없거나 weight가 0이면 null 반환.
+     */
+    suspend fun queryLatestWeight(since: Long, to: Long): HealthRecord? {
+        val s = store ?: return null
+        return runCatching {
+            val filter = InstantTimeFilter.of(Instant.ofEpochMilli(since), Instant.ofEpochMilli(to))
+            val request = DataTypes.BODY_COMPOSITION.readDataRequestBuilder
+                .setInstantTimeFilter(filter).build()
+            val latest = s.readData(request).dataList
+                .maxByOrNull { it.endTime?.toEpochMilli() ?: 0L }
+                ?: return@runCatching null
+
+            val weight = latest.getValueOrDefault(DataType.BodyCompositionType.WEIGHT, 0f)
+            if (weight <= 0f) return@runCatching null
+
+            val bmi = latest.getValueOrDefault(DataType.BodyCompositionType.BODY_MASS_INDEX, 0f)
+                .let { if (it > 0f) it.toDouble() else null }
+            val bodyFat = latest.getValueOrDefault(DataType.BodyCompositionType.BODY_FAT, 0f)
+                .let { if (it > 0f) it.toDouble() else null }
+
+            val startMs = latest.startTime?.toEpochMilli() ?: since
+            val endMs = latest.endTime?.toEpochMilli() ?: startMs
+
+            HealthRecord(
+                dataType = DATA_TYPE_WEIGHT,
+                timestamp = startMs,
+                endTimestamp = endMs,
+                tzOffset = currentTzOffset(),
+                source = SOURCE,
+                valueJson = json.encodeToString(WeightValue(
+                    weight = weight.toDouble(),
+                    bmi = bmi,
+                    bodyFat = bodyFat
+                )),
+                createdAt = System.currentTimeMillis(),
+            )
+        }.onFailure { Log.e(TAG, "체중 조회 실패", it) }.getOrNull()
+    }
+
     // --- Private ---
 
     @Volatile private var store: HealthDataStore? = null
@@ -486,6 +527,13 @@ class SamsungHealthClient(private val context: Context) {
     )
 
     @Serializable
+    private data class WeightValue(
+        val weight: Double,
+        val bmi: Double?,
+        val bodyFat: Double?
+    )
+
+    @Serializable
     private data class DailySummaryValue(
         val date: String,
         val heartRateAvg: Int?,
@@ -508,6 +556,7 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_EXERCISE = "exercise"
         const val DATA_TYPE_HOURLY_SUMMARY = "hourly_summary"
         const val DATA_TYPE_DAILY_SUMMARY = "daily_summary"
+        const val DATA_TYPE_WEIGHT = "weight"
         const val SOURCE = "samsung_health"
 
         private const val TAG = "FlutterHealth"
@@ -519,7 +568,8 @@ class SamsungHealthClient(private val context: Context) {
             Permission.of(DataTypes.EXERCISE, AccessType.READ),
             Permission.of(DataTypes.SLEEP, AccessType.READ),
             Permission.of(DataTypes.BLOOD_OXYGEN, AccessType.READ),
-            Permission.of(DataTypes.ACTIVITY_SUMMARY, AccessType.READ)
+            Permission.of(DataTypes.ACTIVITY_SUMMARY, AccessType.READ),
+            Permission.of(DataTypes.BODY_COMPOSITION, AccessType.READ)
         )
     }
 }
