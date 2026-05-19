@@ -148,14 +148,13 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     final to    = DateTime.now();
     final since = to.subtract(const Duration(days: 30));
     try {
-      final record = await _plugin.queryLatestWeight(since, to);
-      if (record == null) {
-        _log('queryLatestWeight → null');
-      } else {
-        _log('weight ${_fmtMs(record.timestamp)}\n${_prettyJson(record.valueJson)}');
+      final records = await _plugin.queryWeights(since, to);
+      _log('queryWeights → ${records.length} record(s)');
+      for (final r in records.take(5)) {
+        _log('  weight ${_fmtMs(r.timestamp)}\n${_prettyJson(r.valueJson)}');
       }
     } catch (e) {
-      _log('queryLatestWeight error: $e');
+      _log('queryWeights error: $e');
     }
   }
 
@@ -326,7 +325,7 @@ class _ButtonGrid extends StatelessWidget {
           OutlinedButton(onPressed: onQueryExercise, child: const Text('Exercise (1 day)')),
           OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')),
           OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary')),
-          OutlinedButton(onPressed: onQueryWeight, child: const Text('Latest Weight')),
+          OutlinedButton(onPressed: onQueryWeight, child: const Text('Weights (30 day)')),
           FilledButton.tonal(
             onPressed: onToggleLoop,
             child: Text(loopRunning ? 'Stop 5-min Loop' : 'Start 5-min Loop'),

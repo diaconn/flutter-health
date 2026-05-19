@@ -48,8 +48,7 @@ class FlutterHealth {
   Future<HealthRecord?> queryDailySummary(DateTime date) =>
       FlutterHealthPlatform.instance.queryDailySummary(date);
 
-  /// [since]~[to] 구간에서 가장 최근의 체중 (weight) 레코드를 반환.
-  /// 데이터 없으면 null.
-  Future<HealthRecord?> queryLatestWeight(DateTime since, DateTime to) =>
-      FlutterHealthPlatform.instance.queryLatestWeight(since, to);
+  /// [since]~[to] 구간 내 모든 체중 (weight) 측정 목록을 시간순으로 반환.
+  Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryWeights(since, to);
 }

@@ -238,29 +238,32 @@ final class HealthKitClient {
         )
     }
 
-    func queryLatestWeight(since: Date, to: Date) async -> HealthRecord? {
-        guard let qt = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return nil }
+    func queryWeights(since: Date, to: Date) async -> [HealthRecord] {
+        guard let qt = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return [] }
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
-            limit: 1
+            sortDescriptors: [SortDescriptor(\.startDate)]
         )
-        guard let sample = try? await descriptor.result(for: store).first else { return nil }
-        let kg = sample.quantity.doubleValue(for: weightUnit)
-        guard kg > 0 else { return nil }
-        // HealthKit의 .bodyMass 샘플에는 BMI/체지방률이 포함되지 않음.
-        // 별도 .bodyMassIndex / .bodyFatPercentage 쿼리가 필요해 의도적으로 nil 유지.
-        let value = WeightValue(weight: kg, bmi: nil, bodyFat: nil)
-        return HealthRecord(
-            dataType: Self.dataTypeWeight,
-            timestamp: toMs(sample.startDate),
-            endTimestamp: toMs(sample.endDate),
-            tzOffset: currentTzOffset(),
-            source: Self.source,
-            valueJson: encodeToJson(value),
-            createdAt: toMs(Date())
-        )
+        guard let samples = try? await descriptor.result(for: store) else { return [] }
+        let tz = currentTzOffset()
+        let now = toMs(Date())
+        return samples.compactMap { sample in
+            let kg = sample.quantity.doubleValue(for: weightUnit)
+            guard kg > 0 else { return nil }
+            // HealthKit의 .bodyMass 샘플에는 BMI/체지방률이 포함되지 않음.
+            // 별도 .bodyMassIndex / .bodyFatPercentage 쿼리가 필요해 의도적으로 nil 유지.
+            let value = WeightValue(weight: kg, bmi: nil, bodyFat: nil)
+            return HealthRecord(
+                dataType: Self.dataTypeWeight,
+                timestamp: toMs(sample.startDate),
+                endTimestamp: toMs(sample.endDate),
+                tzOffset: tz,
+                source: Self.source,
+                valueJson: encodeToJson(value),
+                createdAt: now
+            )
+        }
     }
 
     // MARK: - Private

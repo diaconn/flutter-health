@@ -70,11 +70,11 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
   }
 
   @override
-  Future<HealthRecord?> queryLatestWeight(DateTime since, DateTime to) async {
-    final result = await methodChannel.invokeMethod<Map>('queryLatestWeight', {
+  Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) async {
+    final result = await methodChannel.invokeMethod<List>('queryWeights', {
       'since': since.millisecondsSinceEpoch,
       'to': to.millisecondsSinceEpoch,
     });
-    return result == null ? null : HealthRecord.fromMap(result);
+    return (result ?? []).map((e) => HealthRecord.fromMap(e as Map)).toList();
   }
 }

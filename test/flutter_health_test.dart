@@ -46,8 +46,8 @@ class MockFlutterHealthPlatform
       Future.value(null);
 
   @override
-  Future<HealthRecord?> queryLatestWeight(DateTime since, DateTime to) =>
-      Future.value(null);
+  Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) =>
+      Future.value([]);
 }
 
 void main() {

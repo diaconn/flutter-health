@@ -126,7 +126,7 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }
             }
-            "queryLatestWeight" -> {
+            "queryWeights" -> {
                 val since = call.argument<Number>("since")?.toLong()
                 val to = call.argument<Number>("to")?.toLong()
                 if (since == null || to == null) {
@@ -134,7 +134,7 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     return
                 }
                 scope.launch {
-                    runCatching { client.queryLatestWeight(since, to)?.toMap() }
+                    runCatching { client.queryWeights(since, to).map { it.toMap() } }
                         .onSuccess { result.success(it) }
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }

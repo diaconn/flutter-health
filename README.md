@@ -102,7 +102,7 @@ if (record != null) {
 | `queryEndedExerciseSessions(since, to)` | 구간 내 종료된 운동 세션 목록 |
 | `queryHourlySummary(hourStart, hourEnd)` | 1시간 집계 (HR·걸음·칼로리·거리) |
 | `queryDailySummary(date)` | 1일 집계 (HR·걸음·칼로리·거리·수면·운동) |
-| `queryLatestWeight(since, to)` | 구간 내 가장 최근 체중 (weight·BMI·체지방률) |
+| `queryWeights(since, to)` | 구간 내 모든 체중 측정 목록 시간순 (weight·BMI·체지방률) |
 
 ---
 

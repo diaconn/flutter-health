@@ -121,7 +121,7 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-        case "queryLatestWeight":
+        case "queryWeights":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
                   let toMs    = args["to"]    as? Int else {
@@ -131,8 +131,8 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
             let since = Date(timeIntervalSince1970: Double(sinceMs) / 1000.0)
             let to    = Date(timeIntervalSince1970: Double(toMs)    / 1000.0)
             Task {
-                let record = await client.queryLatestWeight(since: since, to: to)
-                DispatchQueue.main.async { result(record?.toDictionary()) }
+                let records = await client.queryWeights(since: since, to: to)
+                DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
             }
 
         case "queryDailySummary":
