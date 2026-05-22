@@ -134,9 +134,15 @@ class SamsungHealthClient(private val context: Context) {
     suspend fun queryEndedSleepSessions(since: Long, to: Long): List<HealthRecord> {
         val s = store ?: return emptyList()
         return runCatching {
-            val filter = InstantTimeFilter.of(Instant.ofEpochMilli(since), Instant.ofEpochMilli(to))
-            val request = DataTypes.SLEEP.readDataRequestBuilder.setInstantTimeFilter(filter).build()
-            s.readData(request).dataList.mapNotNull { buildSleepRecord(it) }
+            // 수면은 보통 자정을 걸쳐서 일어나므로(예: 23:00 ~ 07:00) 시작 시각을 하루 앞당겨 넉넉히 가져온 뒤,
+            // 종료 시각이 원래 요청 범위(since~to) 안인 것만 남긴다.
+            val sinceLocal = since.toLocalDateTime().minusDays(1)
+            val toLocal = to.toLocalDateTime()
+            val filter = LocalTimeFilter.of(sinceLocal, toLocal)
+            val request = DataTypes.SLEEP.readDataRequestBuilder.setLocalTimeFilter(filter).build()
+            s.readData(request).dataList
+                .mapNotNull { buildSleepRecord(it) }
+                .filter { it.endTimestamp in since..to }
         }.onFailure { Log.e(TAG, "수면 세션 조회 실패", it) }.getOrDefault(emptyList())
     }
 
@@ -144,9 +150,13 @@ class SamsungHealthClient(private val context: Context) {
     suspend fun queryEndedExerciseSessions(since: Long, to: Long): List<HealthRecord> {
         val s = store ?: return emptyList()
         return runCatching {
-            val filter = InstantTimeFilter.of(Instant.ofEpochMilli(since), Instant.ofEpochMilli(to))
-            val request = DataTypes.EXERCISE.readDataRequestBuilder.setInstantTimeFilter(filter).build()
-            s.readData(request).dataList.mapNotNull { buildExerciseRecord(it) }
+            val sinceLocal = since.toLocalDateTime()
+            val toLocal = to.toLocalDateTime()
+            val filter = LocalTimeFilter.of(sinceLocal, toLocal)
+            val request = DataTypes.EXERCISE.readDataRequestBuilder.setLocalTimeFilter(filter).build()
+            s.readData(request).dataList
+                .mapNotNull { buildExerciseRecord(it) }
+                .filter { it.endTimestamp in since..to }
         }.onFailure { Log.e(TAG, "운동 세션 조회 실패", it) }.getOrDefault(emptyList())
     }
 
