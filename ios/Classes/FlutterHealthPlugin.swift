@@ -112,7 +112,7 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
             let hourEnd   = Date(timeIntervalSince1970: Double(endMs)   / 1000.0)
             Task {
                 do {
-                    let record = try await client.queryHourlySummary(hourStart: hourStart, hourEnd: hourEnd)
+                    let record = try await client.queryHourlySummary(from: hourStart, to: hourEnd)
                     DispatchQueue.main.async { result(record?.toDictionary()) }
                 } catch {
                     DispatchQueue.main.async {

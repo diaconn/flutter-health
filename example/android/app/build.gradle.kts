@@ -42,3 +42,9 @@ android {
 flutter {
     source = "../.."
 }
+
+// flutter_health 플러그인이 compileOnly로 참조하는 Samsung Health SDK 런타임 제공.
+// AGP 8.x에서 라이브러리 모듈이(flutter_health 플러그인) 로컬 .aar를 implementation 할 수 없어 디아콘 앱이 직접 제공
+dependencies {
+    implementation(files("${rootProject.projectDir}/../../android/libs/samsung-health-data-api-1.1.0.aar"))
+}

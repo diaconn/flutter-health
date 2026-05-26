@@ -126,8 +126,16 @@ final class HealthKitClient {
             let heartRateMax = workout.statistics(for: HKQuantityType(.heartRate))?.maximumQuantity()?.doubleValue(for: HKUnit(from: "count/min"))
             let distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meter())
                 ?? workout.statistics(for: HKQuantityType(.distanceCycling))?.sumQuantity()?.doubleValue(for: .meter())
+            let mappedType = mapWorkoutType(workout.workoutActivityType)
+            print(
+                "[운동매핑확인] 원본=HKWorkoutActivityType(rawValue=\(workout.workoutActivityType.rawValue))"
+                + " → 앱값=\(mappedType)"
+                + " | 시작=\(workout.startDate) 종료=\(workout.endDate)"
+                + " 지속=\(durationMin)분 칼로리=\(calories.map { String($0) } ?? "nil")"
+                + " 거리=\(distance.map { String($0) } ?? "nil")m"
+            )
             let value = ExerciseValue(
-                exerciseType: mapWorkoutType(workout.workoutActivityType),
+                exerciseType: mappedType,
                 intensity: deriveIntensity(heartRateAvg: heartRateAvg.map { Int($0) }),
                 durationMin: durationMin,
                 calories: calories,
@@ -471,7 +479,7 @@ final class HealthKitClient {
         let hrv: Double?
     }
 
-    private struct SleepStageValue: Codable {
+    fileprivate struct SleepStageValue: Codable {
         let stage: String
         let startMs: Int64
         let endMs: Int64
