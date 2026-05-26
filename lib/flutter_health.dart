@@ -5,6 +5,16 @@ export 'src/models/exercise_value.dart';
 export 'src/models/hourly_summary_value.dart';
 export 'src/models/daily_summary_value.dart';
 export 'src/models/weight_value.dart';
+export 'src/models/blood_glucose_value.dart';
+export 'src/models/blood_pressure_value.dart';
+export 'src/models/nutrition_value.dart';
+export 'src/models/water_intake_value.dart';
+export 'src/models/sleep_apnea_value.dart';
+export 'src/models/floors_climbed_value.dart';
+export 'src/models/energy_score_value.dart';
+export 'src/models/body_temperature_value.dart';
+export 'src/models/skin_temperature_value.dart';
+export 'src/models/heart_rhythm_value.dart';
 
 import 'flutter_health_platform_interface.dart';
 import 'src/models/health_record.dart';
@@ -51,4 +61,44 @@ class FlutterHealth {
   /// [since]~[to] 구간 내 모든 체중 (weight) 측정 목록을 시간순으로 반환.
   Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryWeights(since, to);
+
+  /// [since]~[to] 구간 내 모든 혈당 (blood_glucose) 측정 목록.
+  Future<List<HealthRecord>> queryBloodGlucose(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryBloodGlucose(since, to);
+
+  /// [since]~[to] 구간 내 모든 혈압 (blood_pressure) 측정 목록.
+  Future<List<HealthRecord>> queryBloodPressure(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryBloodPressure(since, to);
+
+  /// [since]~[to] 구간 내 모든 영양 (nutrition) 기록.
+  Future<List<HealthRecord>> queryNutrition(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryNutrition(since, to);
+
+  /// [since]~[to] 구간 내 모든 수분 섭취 (water_intake) 기록.
+  Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryWaterIntake(since, to);
+
+  /// [since]~[to] 구간 내 모든 수면 무호흡 (sleep_apnea) 기록.
+  Future<List<HealthRecord>> querySleepApnea(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.querySleepApnea(since, to);
+
+  /// [since]~[to] 구간 내 모든 계단 (floors_climbed) 기록.
+  Future<List<HealthRecord>> queryFloorsClimbed(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryFloorsClimbed(since, to);
+
+  /// [since]~[to] 구간의 일별 에너지 점수 (energy_score) 목록.
+  Future<List<HealthRecord>> queryEnergyScore(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryEnergyScore(since, to);
+
+  /// [since]~[to] 구간 내 모든 체온 (body_temperature) 측정 목록.
+  Future<List<HealthRecord>> queryBodyTemperature(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryBodyTemperature(since, to);
+
+  /// [since]~[to] 구간 내 모든 피부 온도 (skin_temperature) 측정 목록.
+  Future<List<HealthRecord>> querySkinTemperature(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.querySkinTemperature(since, to);
+
+  /// [since]~[to] 구간 내 부정맥 알림 (heart_rhythm) 기록.
+  Future<List<HealthRecord>> queryIrregularHeartRhythm(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryIrregularHeartRhythm(since, to);
 }

@@ -5,6 +5,8 @@ class HourlySummaryValue {
   final int? heartRateMax;
   final int? stepsTotal;
   final double? caloriesTotalKcal;
+  final double? caloriesActiveTotalKcal;
+  final int? activeTimeTotalMin;
   final double? distanceTotalM;
 
   const HourlySummaryValue({
@@ -14,6 +16,8 @@ class HourlySummaryValue {
     this.heartRateMax,
     this.stepsTotal,
     this.caloriesTotalKcal,
+    this.caloriesActiveTotalKcal,
+    this.activeTimeTotalMin,
     this.distanceTotalM,
   });
 
@@ -24,6 +28,8 @@ class HourlySummaryValue {
         heartRateMax: json['heartRateMax'] as int?,
         stepsTotal: json['stepsTotal'] as int?,
         caloriesTotalKcal: (json['caloriesTotalKcal'] as num?)?.toDouble(),
+        caloriesActiveTotalKcal: (json['caloriesActiveTotalKcal'] as num?)?.toDouble(),
+        activeTimeTotalMin: json['activeTimeTotalMin'] as int?,
         distanceTotalM: (json['distanceTotalM'] as num?)?.toDouble(),
       );
 
@@ -34,6 +40,8 @@ class HourlySummaryValue {
         if (heartRateMax != null) 'heartRateMax': heartRateMax,
         if (stepsTotal != null) 'stepsTotal': stepsTotal,
         if (caloriesTotalKcal != null) 'caloriesTotalKcal': caloriesTotalKcal,
+        if (caloriesActiveTotalKcal != null) 'caloriesActiveTotalKcal': caloriesActiveTotalKcal,
+        if (activeTimeTotalMin != null) 'activeTimeTotalMin': activeTimeTotalMin,
         if (distanceTotalM != null) 'distanceTotalM': distanceTotalM,
       };
 }

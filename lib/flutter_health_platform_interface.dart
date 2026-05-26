@@ -28,4 +28,14 @@ abstract class FlutterHealthPlatform extends PlatformInterface {
   Future<HealthRecord?> queryHourlySummary(DateTime hourStart, DateTime hourEnd) => throw UnimplementedError();
   Future<HealthRecord?> queryDailySummary(DateTime date) => throw UnimplementedError();
   Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryBloodGlucose(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryBloodPressure(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryNutrition(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> querySleepApnea(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryFloorsClimbed(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryEnergyScore(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryBodyTemperature(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> querySkinTemperature(DateTime since, DateTime to) => throw UnimplementedError();
+  Future<List<HealthRecord>> queryIrregularHeartRhythm(DateTime since, DateTime to) => throw UnimplementedError();
 }

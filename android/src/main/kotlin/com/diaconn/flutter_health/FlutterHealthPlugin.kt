@@ -156,6 +156,42 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }
             }
+            "queryBloodGlucose",
+            "queryBloodPressure",
+            "queryNutrition",
+            "queryWaterIntake",
+            "querySleepApnea",
+            "queryFloorsClimbed",
+            "queryEnergyScore",
+            "queryBodyTemperature",
+            "querySkinTemperature",
+            "queryIrregularHeartRhythm" -> {
+                val since = call.argument<Number>("since")?.toLong()
+                val to = call.argument<Number>("to")?.toLong()
+                if (since == null || to == null) {
+                    result.error("INVALID_ARGS", "since and to are required", null)
+                    return
+                }
+                scope.launch {
+                    runCatching {
+                        val list = when (call.method) {
+                            "queryBloodGlucose" -> client.queryBloodGlucose(since, to)
+                            "queryBloodPressure" -> client.queryBloodPressure(since, to)
+                            "queryNutrition" -> client.queryNutrition(since, to)
+                            "queryWaterIntake" -> client.queryWaterIntake(since, to)
+                            "querySleepApnea" -> client.querySleepApnea(since, to)
+                            "queryFloorsClimbed" -> client.queryFloorsClimbed(since, to)
+                            "queryEnergyScore" -> client.queryEnergyScore(since, to)
+                            "queryBodyTemperature" -> client.queryBodyTemperature(since, to)
+                            "querySkinTemperature" -> client.querySkinTemperature(since, to)
+                            "queryIrregularHeartRhythm" -> client.queryIrregularHeartRhythm(since, to)
+                            else -> emptyList()
+                        }
+                        list.map { it.toMap() }
+                    }.onSuccess { result.success(it) }
+                     .onFailure { result.error("QUERY_ERROR", it.message, null) }
+                }
+            }
             else -> result.notImplemented()
         }
     }

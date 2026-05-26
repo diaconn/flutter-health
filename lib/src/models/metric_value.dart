@@ -6,6 +6,8 @@ class MetricValue {
   final int? stepsDaily;
   final double? caloriesInterval;
   final double? caloriesDaily;
+  final double? caloriesActiveInterval;
+  final double? caloriesActiveDaily;
   final double? distanceInterval;
   final double? distanceDaily;
   final int? spO2;
@@ -19,6 +21,8 @@ class MetricValue {
     this.stepsDaily,
     this.caloriesInterval,
     this.caloriesDaily,
+    this.caloriesActiveInterval,
+    this.caloriesActiveDaily,
     this.distanceInterval,
     this.distanceDaily,
     this.spO2,
@@ -33,6 +37,8 @@ class MetricValue {
         stepsDaily: json['stepsDaily'] as int?,
         caloriesInterval: (json['caloriesInterval'] as num?)?.toDouble(),
         caloriesDaily: (json['caloriesDaily'] as num?)?.toDouble(),
+        caloriesActiveInterval: (json['caloriesActiveInterval'] as num?)?.toDouble(),
+        caloriesActiveDaily: (json['caloriesActiveDaily'] as num?)?.toDouble(),
         distanceInterval: (json['distanceInterval'] as num?)?.toDouble(),
         distanceDaily: (json['distanceDaily'] as num?)?.toDouble(),
         spO2: json['spO2'] as int?,
@@ -47,6 +53,8 @@ class MetricValue {
         if (stepsDaily != null) 'stepsDaily': stepsDaily,
         if (caloriesInterval != null) 'caloriesInterval': caloriesInterval,
         if (caloriesDaily != null) 'caloriesDaily': caloriesDaily,
+        if (caloriesActiveInterval != null) 'caloriesActiveInterval': caloriesActiveInterval,
+        if (caloriesActiveDaily != null) 'caloriesActiveDaily': caloriesActiveDaily,
         if (distanceInterval != null) 'distanceInterval': distanceInterval,
         if (distanceDaily != null) 'distanceDaily': distanceDaily,
         if (spO2 != null) 'spO2': spO2,

@@ -158,6 +158,32 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     }
   }
 
+  Future<void> _queryListByName(String name) async {
+    final to    = DateTime.now();
+    final since = to.subtract(const Duration(days: 30));
+    try {
+      final records = switch (name) {
+        'blood_glucose'   => await _plugin.queryBloodGlucose(since, to),
+        'blood_pressure'  => await _plugin.queryBloodPressure(since, to),
+        'nutrition'       => await _plugin.queryNutrition(since, to),
+        'water_intake'    => await _plugin.queryWaterIntake(since, to),
+        'sleep_apnea'     => await _plugin.querySleepApnea(since, to),
+        'floors_climbed'  => await _plugin.queryFloorsClimbed(since, to),
+        'energy_score'    => await _plugin.queryEnergyScore(since, to),
+        'body_temperature'=> await _plugin.queryBodyTemperature(since, to),
+        'skin_temperature'=> await _plugin.querySkinTemperature(since, to),
+        'heart_rhythm'    => await _plugin.queryIrregularHeartRhythm(since, to),
+        _ => <HealthRecord>[],
+      };
+      _log('$name → ${records.length} record(s)');
+      for (final r in records.take(5)) {
+        _log('  $name ${_fmtMs(r.timestamp)}\n${_prettyJson(r.valueJson)}');
+      }
+    } catch (e) {
+      _log('$name error: $e');
+    }
+  }
+
   void _toggleLoop() {
     if (_loopRunning) {
       _loopTimer?.cancel();
@@ -243,6 +269,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
             onQueryDaily: _queryDaily,
             onQueryWeight: _queryWeight,
             onToggleLoop: _toggleLoop,
+            onQueryByName: _queryListByName,
           ),
           const Divider(height: 1),
           Expanded(
@@ -294,6 +321,7 @@ class _ButtonGrid extends StatelessWidget {
   final VoidCallback onConnect, onRequestPermission;
   final VoidCallback onQueryMetric, onQuerySleep, onQueryExercise;
   final VoidCallback onQueryHourly, onQueryDaily, onQueryWeight, onToggleLoop;
+  final Future<void> Function(String) onQueryByName;
 
   const _ButtonGrid({
     required this.available,
@@ -308,6 +336,7 @@ class _ButtonGrid extends StatelessWidget {
     required this.onQueryDaily,
     required this.onQueryWeight,
     required this.onToggleLoop,
+    required this.onQueryByName,
   });
 
   @override
@@ -326,6 +355,16 @@ class _ButtonGrid extends StatelessWidget {
           OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')),
           OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary')),
           OutlinedButton(onPressed: onQueryWeight, child: const Text('Weights (30 day)')),
+          OutlinedButton(onPressed: () => onQueryByName('blood_glucose'),    child: const Text('Glucose')),
+          OutlinedButton(onPressed: () => onQueryByName('blood_pressure'),   child: const Text('BP')),
+          OutlinedButton(onPressed: () => onQueryByName('nutrition'),        child: const Text('Nutrition')),
+          OutlinedButton(onPressed: () => onQueryByName('water_intake'),     child: const Text('Water')),
+          OutlinedButton(onPressed: () => onQueryByName('sleep_apnea'),      child: const Text('Apnea')),
+          OutlinedButton(onPressed: () => onQueryByName('floors_climbed'),   child: const Text('Floors')),
+          OutlinedButton(onPressed: () => onQueryByName('energy_score'),     child: const Text('Energy')),
+          OutlinedButton(onPressed: () => onQueryByName('body_temperature'), child: const Text('Body Temp')),
+          OutlinedButton(onPressed: () => onQueryByName('skin_temperature'), child: const Text('Skin Temp')),
+          OutlinedButton(onPressed: () => onQueryByName('heart_rhythm'),     child: const Text('Rhythm')),
           FilledButton.tonal(
             onPressed: onToggleLoop,
             child: Text(loopRunning ? 'Stop 5-min Loop' : 'Start 5-min Loop'),

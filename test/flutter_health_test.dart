@@ -48,6 +48,46 @@ class MockFlutterHealthPlatform
   @override
   Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) =>
       Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryBloodGlucose(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryBloodPressure(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryNutrition(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> querySleepApnea(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryFloorsClimbed(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryEnergyScore(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryBodyTemperature(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> querySkinTemperature(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryIrregularHeartRhythm(DateTime since, DateTime to) =>
+      Future.value([]);
 }
 
 void main() {

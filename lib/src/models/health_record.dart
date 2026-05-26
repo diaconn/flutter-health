@@ -6,6 +6,16 @@ import 'exercise_value.dart';
 import 'hourly_summary_value.dart';
 import 'daily_summary_value.dart';
 import 'weight_value.dart';
+import 'blood_glucose_value.dart';
+import 'blood_pressure_value.dart';
+import 'nutrition_value.dart';
+import 'water_intake_value.dart';
+import 'sleep_apnea_value.dart';
+import 'floors_climbed_value.dart';
+import 'energy_score_value.dart';
+import 'body_temperature_value.dart';
+import 'skin_temperature_value.dart';
+import 'heart_rhythm_value.dart';
 
 class HealthRecord {
   static const String typeMetric = 'metric';
@@ -14,6 +24,16 @@ class HealthRecord {
   static const String typeHourlySummary = 'hourly_summary';
   static const String typeDailySummary = 'daily_summary';
   static const String typeWeight = 'weight';
+  static const String typeBloodGlucose = 'blood_glucose';
+  static const String typeBloodPressure = 'blood_pressure';
+  static const String typeNutrition = 'nutrition';
+  static const String typeWaterIntake = 'water_intake';
+  static const String typeSleepApnea = 'sleep_apnea';
+  static const String typeFloorsClimbed = 'floors_climbed';
+  static const String typeEnergyScore = 'energy_score';
+  static const String typeBodyTemperature = 'body_temperature';
+  static const String typeSkinTemperature = 'skin_temperature';
+  static const String typeHeartRhythm = 'heart_rhythm';
 
   final String dataType;
   final int timestamp;
@@ -43,23 +63,36 @@ class HealthRecord {
         createdAt: (map['createdAt'] as num).toInt(),
       );
 
-  MetricValue? get asMetric =>
-      dataType == typeMetric ? MetricValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
+  Map<String, dynamic> _decoded() => jsonDecode(valueJson) as Map<String, dynamic>;
 
-  SleepValue? get asSleep =>
-      dataType == typeSleep ? SleepValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
-
-  ExerciseValue? get asExercise =>
-      dataType == typeExercise ? ExerciseValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
-
+  MetricValue? get asMetric => dataType == typeMetric ? MetricValue.fromJson(_decoded()) : null;
+  SleepValue? get asSleep => dataType == typeSleep ? SleepValue.fromJson(_decoded()) : null;
+  ExerciseValue? get asExercise => dataType == typeExercise ? ExerciseValue.fromJson(_decoded()) : null;
   HourlySummaryValue? get asHourlySummary =>
-      dataType == typeHourlySummary ? HourlySummaryValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
-
+      dataType == typeHourlySummary ? HourlySummaryValue.fromJson(_decoded()) : null;
   DailySummaryValue? get asDailySummary =>
-      dataType == typeDailySummary ? DailySummaryValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
-
-  WeightValue? get asWeight =>
-      dataType == typeWeight ? WeightValue.fromJson(jsonDecode(valueJson) as Map<String, dynamic>) : null;
+      dataType == typeDailySummary ? DailySummaryValue.fromJson(_decoded()) : null;
+  WeightValue? get asWeight => dataType == typeWeight ? WeightValue.fromJson(_decoded()) : null;
+  BloodGlucoseValue? get asBloodGlucose =>
+      dataType == typeBloodGlucose ? BloodGlucoseValue.fromJson(_decoded()) : null;
+  BloodPressureValue? get asBloodPressure =>
+      dataType == typeBloodPressure ? BloodPressureValue.fromJson(_decoded()) : null;
+  NutritionValue? get asNutrition =>
+      dataType == typeNutrition ? NutritionValue.fromJson(_decoded()) : null;
+  WaterIntakeValue? get asWaterIntake =>
+      dataType == typeWaterIntake ? WaterIntakeValue.fromJson(_decoded()) : null;
+  SleepApneaValue? get asSleepApnea =>
+      dataType == typeSleepApnea ? SleepApneaValue.fromJson(_decoded()) : null;
+  FloorsClimbedValue? get asFloorsClimbed =>
+      dataType == typeFloorsClimbed ? FloorsClimbedValue.fromJson(_decoded()) : null;
+  EnergyScoreValue? get asEnergyScore =>
+      dataType == typeEnergyScore ? EnergyScoreValue.fromJson(_decoded()) : null;
+  BodyTemperatureValue? get asBodyTemperature =>
+      dataType == typeBodyTemperature ? BodyTemperatureValue.fromJson(_decoded()) : null;
+  SkinTemperatureValue? get asSkinTemperature =>
+      dataType == typeSkinTemperature ? SkinTemperatureValue.fromJson(_decoded()) : null;
+  HeartRhythmValue? get asHeartRhythm =>
+      dataType == typeHeartRhythm ? HeartRhythmValue.fromJson(_decoded()) : null;
 
   @override
   String toString() => 'HealthRecord(dataType: $dataType, timestamp: $timestamp, source: $source)';
