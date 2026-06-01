@@ -71,12 +71,19 @@ class SwimmingInfo {
   final String? poolLengthUnit;
   final double? totalDistance;
   final int? totalDurationSec;
+  // PM 6 — iOS HKMetadataKey 매핑 추가:
+  final String? locationType;   // "Pool" | "OpenWater"  (HKMetadataKeySwimmingLocationType)
+  final String? strokeStyle;    // "Unknown" | "Mixed" | "Freestyle" | "Backstroke" |
+                                // "Breaststroke" | "Butterfly" | "Kickboard"
+                                //   (HKMetadataKeySwimmingStrokeStyle enum)
 
   const SwimmingInfo({
     this.poolLength,
     this.poolLengthUnit,
     this.totalDistance,
     this.totalDurationSec,
+    this.locationType,
+    this.strokeStyle,
   });
 
   factory SwimmingInfo.fromJson(Map<String, dynamic> json) => SwimmingInfo(
@@ -84,6 +91,8 @@ class SwimmingInfo {
         poolLengthUnit: json['poolLengthUnit'] as String?,
         totalDistance: (json['totalDistance'] as num?)?.toDouble(),
         totalDurationSec: (json['totalDurationSec'] as num?)?.toInt(),
+        locationType: json['locationType'] as String?,
+        strokeStyle: json['strokeStyle'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -91,6 +100,126 @@ class SwimmingInfo {
         if (poolLengthUnit != null) 'poolLengthUnit': poolLengthUnit,
         if (totalDistance != null) 'totalDistance': totalDistance,
         if (totalDurationSec != null) 'totalDurationSec': totalDurationSec,
+        if (locationType != null) 'locationType': locationType,
+        if (strokeStyle != null) 'strokeStyle': strokeStyle,
+      };
+}
+
+/// 운동 중 발생한 시점 이벤트 (iOS `HKWorkoutEvent`).
+class ExerciseEventValue {
+  /// "pause" | "resume" | "lap" | "marker" | "segment"
+  /// | "motionPaused" | "motionResumed" | "pauseOrResumeRequest"
+  final String type;
+  final int startMs;
+  final int endMs;
+  /// 이벤트별 부가 metadata (JSON 문자열로 임베드)
+  final String? metadata;
+
+  const ExerciseEventValue({
+    required this.type,
+    required this.startMs,
+    required this.endMs,
+    this.metadata,
+  });
+
+  factory ExerciseEventValue.fromJson(Map<String, dynamic> json) => ExerciseEventValue(
+        type: json['type'] as String,
+        startMs: (json['startMs'] as num).toInt(),
+        endMs: (json['endMs'] as num).toInt(),
+        metadata: json['metadata'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'startMs': startMs,
+        'endMs': endMs,
+        if (metadata != null) 'metadata': metadata,
+      };
+}
+
+/// 한 운동 세션 안의 개별 활동 (iOS 16+ `HKWorkoutActivity` — 트라이애슬론 등 멀티세그먼트).
+class ExerciseActivityValue {
+  final String activityType;
+  final int startMs;
+  final int endMs;
+  final int? durationMin;
+  final double? calories;
+  final double? distance;
+  final bool? isIndoor;
+
+  const ExerciseActivityValue({
+    required this.activityType,
+    required this.startMs,
+    required this.endMs,
+    this.durationMin,
+    this.calories,
+    this.distance,
+    this.isIndoor,
+  });
+
+  factory ExerciseActivityValue.fromJson(Map<String, dynamic> json) => ExerciseActivityValue(
+        activityType: json['activityType'] as String,
+        startMs: (json['startMs'] as num).toInt(),
+        endMs: (json['endMs'] as num).toInt(),
+        durationMin: (json['durationMin'] as num?)?.toInt(),
+        calories: (json['calories'] as num?)?.toDouble(),
+        distance: (json['distance'] as num?)?.toDouble(),
+        isIndoor: json['isIndoor'] as bool?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'activityType': activityType,
+        'startMs': startMs,
+        'endMs': endMs,
+        if (durationMin != null) 'durationMin': durationMin,
+        if (calories != null) 'calories': calories,
+        if (distance != null) 'distance': distance,
+        if (isIndoor != null) 'isIndoor': isIndoor,
+      };
+}
+
+/// 운동을 기록한 디바이스 정보 (iOS `HKDevice`).
+class ExerciseDeviceValue {
+  final String? name;
+  final String? manufacturer;
+  final String? model;
+  final String? hardwareVersion;
+  final String? firmwareVersion;
+  final String? softwareVersion;
+  final String? localIdentifier;
+  final String? udiDeviceIdentifier;
+
+  const ExerciseDeviceValue({
+    this.name,
+    this.manufacturer,
+    this.model,
+    this.hardwareVersion,
+    this.firmwareVersion,
+    this.softwareVersion,
+    this.localIdentifier,
+    this.udiDeviceIdentifier,
+  });
+
+  factory ExerciseDeviceValue.fromJson(Map<String, dynamic> json) => ExerciseDeviceValue(
+        name: json['name'] as String?,
+        manufacturer: json['manufacturer'] as String?,
+        model: json['model'] as String?,
+        hardwareVersion: json['hardwareVersion'] as String?,
+        firmwareVersion: json['firmwareVersion'] as String?,
+        softwareVersion: json['softwareVersion'] as String?,
+        localIdentifier: json['localIdentifier'] as String?,
+        udiDeviceIdentifier: json['udiDeviceIdentifier'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        if (name != null) 'name': name,
+        if (manufacturer != null) 'manufacturer': manufacturer,
+        if (model != null) 'model': model,
+        if (hardwareVersion != null) 'hardwareVersion': hardwareVersion,
+        if (firmwareVersion != null) 'firmwareVersion': firmwareVersion,
+        if (softwareVersion != null) 'softwareVersion': softwareVersion,
+        if (localIdentifier != null) 'localIdentifier': localIdentifier,
+        if (udiDeviceIdentifier != null) 'udiDeviceIdentifier': udiDeviceIdentifier,
       };
 }
 
@@ -127,6 +256,24 @@ class ExerciseValue {
   final List<ExerciseLogPoint>? log;
   final SwimmingInfo? swimming;
 
+  // PM 6 (A안 envelope 임베드) — iOS 측 HKWorkout 부속 정보 직접 임베드.
+  /// 운동 중 시점 이벤트 (pause/resume/lap/marker/segment). iOS `HKWorkoutEvent`.
+  final List<ExerciseEventValue>? events;
+  /// 멀티세그먼트 활동 (트라이애슬론 등). iOS 16+ `HKWorkoutActivity`.
+  final List<ExerciseActivityValue>? activities;
+  /// 실내 운동 여부. iOS `HKMetadataKeyIndoorWorkout`.
+  final bool? isIndoor;
+  /// 휴식 대비 강도 배수 (1=휴식, 8.5=러닝). iOS `HKMetadataKeyAverageMETs`.
+  final double? averageMets;
+  /// 측정 당시 날씨 상태. iOS `HKMetadataKeyWeatherCondition`.
+  final String? weatherCondition;
+  /// 측정 당시 기온 (°C). iOS `HKMetadataKeyWeatherTemperature`.
+  final double? weatherTemperature;
+  /// 측정 당시 습도 (%). iOS `HKMetadataKeyWeatherHumidity`.
+  final double? weatherHumidity;
+  /// 기록 디바이스 정보. iOS `HKDevice`.
+  final ExerciseDeviceValue? device;
+
   const ExerciseValue({
     required this.exerciseType,
     this.intensity,
@@ -159,6 +306,14 @@ class ExerciseValue {
     this.route,
     this.log,
     this.swimming,
+    this.events,
+    this.activities,
+    this.isIndoor,
+    this.averageMets,
+    this.weatherCondition,
+    this.weatherTemperature,
+    this.weatherHumidity,
+    this.device,
   });
 
   factory ExerciseValue.fromJson(Map<String, dynamic> json) => ExerciseValue(
@@ -199,6 +354,20 @@ class ExerciseValue {
         swimming: json['swimming'] == null
             ? null
             : SwimmingInfo.fromJson(json['swimming'] as Map<String, dynamic>),
+        events: (json['events'] as List?)
+            ?.map((e) => ExerciseEventValue.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        activities: (json['activities'] as List?)
+            ?.map((e) => ExerciseActivityValue.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        isIndoor: json['isIndoor'] as bool?,
+        averageMets: (json['averageMets'] as num?)?.toDouble(),
+        weatherCondition: json['weatherCondition'] as String?,
+        weatherTemperature: (json['weatherTemperature'] as num?)?.toDouble(),
+        weatherHumidity: (json['weatherHumidity'] as num?)?.toDouble(),
+        device: json['device'] == null
+            ? null
+            : ExerciseDeviceValue.fromJson(json['device'] as Map<String, dynamic>),
       );
 
   Map<String, dynamic> toJson() => {
@@ -233,5 +402,13 @@ class ExerciseValue {
         if (route != null) 'route': route!.map((e) => e.toJson()).toList(),
         if (log != null) 'log': log!.map((e) => e.toJson()).toList(),
         if (swimming != null) 'swimming': swimming!.toJson(),
+        if (events != null) 'events': events!.map((e) => e.toJson()).toList(),
+        if (activities != null) 'activities': activities!.map((e) => e.toJson()).toList(),
+        if (isIndoor != null) 'isIndoor': isIndoor,
+        if (averageMets != null) 'averageMets': averageMets,
+        if (weatherCondition != null) 'weatherCondition': weatherCondition,
+        if (weatherTemperature != null) 'weatherTemperature': weatherTemperature,
+        if (weatherHumidity != null) 'weatherHumidity': weatherHumidity,
+        if (device != null) 'device': device!.toJson(),
       };
 }

@@ -11,6 +11,12 @@ class DailySummaryValue {
   final int? sleepDurationMin;
   final int? sleepDeepMin;
   final int? sleepRemMin;
+
+  /// 얕은/코어 수면 분. iOS 는 Apple Core 단계를 light 로 매핑해 포함.
+  final int? sleepLightMin;
+
+  /// 수면 중 깬 시간 합(분).
+  final int? sleepAwakeMin;
   final int? exerciseCount;
   final int? exerciseTotalMin;
   final double? exerciseTotalCalories;
@@ -28,6 +34,8 @@ class DailySummaryValue {
     this.sleepDurationMin,
     this.sleepDeepMin,
     this.sleepRemMin,
+    this.sleepLightMin,
+    this.sleepAwakeMin,
     this.exerciseCount,
     this.exerciseTotalMin,
     this.exerciseTotalCalories,
@@ -46,6 +54,8 @@ class DailySummaryValue {
         sleepDurationMin: json['sleepDurationMin'] as int?,
         sleepDeepMin: json['sleepDeepMin'] as int?,
         sleepRemMin: json['sleepRemMin'] as int?,
+        sleepLightMin: json['sleepLightMin'] as int?,
+        sleepAwakeMin: json['sleepAwakeMin'] as int?,
         exerciseCount: json['exerciseCount'] as int?,
         exerciseTotalMin: json['exerciseTotalMin'] as int?,
         exerciseTotalCalories: (json['exerciseTotalCalories'] as num?)?.toDouble(),
@@ -64,6 +74,8 @@ class DailySummaryValue {
         if (sleepDurationMin != null) 'sleepDurationMin': sleepDurationMin,
         if (sleepDeepMin != null) 'sleepDeepMin': sleepDeepMin,
         if (sleepRemMin != null) 'sleepRemMin': sleepRemMin,
+        if (sleepLightMin != null) 'sleepLightMin': sleepLightMin,
+        if (sleepAwakeMin != null) 'sleepAwakeMin': sleepAwakeMin,
         if (exerciseCount != null) 'exerciseCount': exerciseCount,
         if (exerciseTotalMin != null) 'exerciseTotalMin': exerciseTotalMin,
         if (exerciseTotalCalories != null) 'exerciseTotalCalories': exerciseTotalCalories,

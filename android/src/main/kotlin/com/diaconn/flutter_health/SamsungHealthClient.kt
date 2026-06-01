@@ -284,6 +284,8 @@ class SamsungHealthClient(private val context: Context) {
                 sleepDurationMin = sleepDurationMin,
                 sleepDeepMin = sleepValue?.deepMin,
                 sleepRemMin = sleepValue?.remMin,
+                sleepLightMin = sleepValue?.lightMin,
+                sleepAwakeMin = sleepValue?.awakeMin,
                 exerciseCount = exerciseCount,
                 exerciseTotalMin = exerciseTotalMin,
                 exerciseTotalCalories = exerciseTotalCalories
@@ -634,7 +636,12 @@ class SamsungHealthClient(private val context: Context) {
     // --- Private ---
 
     @Volatile private var store: HealthDataStore? = null
-    private val json = Json { ignoreUnknownKeys = true }
+    // iOS JSONEncoder 가 nil 을 키째로 omit 하는 동작과 통일 (Apple HealthKit/Google Fit/FHIR 권고 동일).
+    // 기본 kotlinx.serialization 은 explicitNulls=true 라 `"key": null` 을 명시 출력 → false 로 끔.
+    private val json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
 
     private fun currentTzOffset(): String =
         OffsetDateTime.now(ZoneId.systemDefault()).offset.toString()
@@ -1050,6 +1057,8 @@ class SamsungHealthClient(private val context: Context) {
         val sleepDurationMin: Int?,
         val sleepDeepMin: Int?,
         val sleepRemMin: Int?,
+        val sleepLightMin: Int?,
+        val sleepAwakeMin: Int?,
         val exerciseCount: Int?,
         val exerciseTotalMin: Int?,
         val exerciseTotalCalories: Double?
