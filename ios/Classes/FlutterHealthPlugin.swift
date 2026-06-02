@@ -160,10 +160,7 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
             }
 
         case "queryBloodGlucose", "queryBloodPressure", "queryInsulinDelivery", "queryNutrition", "queryWaterIntake",
-             "querySleepApnea", "queryFloorsClimbed", "queryEnergyScore", "queryBodyTemperature",
-             "querySkinTemperature", "queryIrregularHeartRhythm",
-             "queryMenstrualFlow", "queryStateOfMind", "queryEcg",
-             "queryAudiogram", "queryHeartbeatSeries", "queryWorkoutRoutes",
+             "queryFloorsClimbed", "queryBodyTemperature", "querySkinTemperature",
              "queryMedication":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
@@ -182,45 +179,13 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 case "queryInsulinDelivery":      records = await client.queryInsulinDelivery(since: since, to: to)
                 case "queryNutrition":            records = await client.queryNutrition(since: since, to: to)
                 case "queryWaterIntake":          records = await client.queryWaterIntake(since: since, to: to)
-                case "querySleepApnea":           records = await client.querySleepApnea(since: since, to: to)
                 case "queryFloorsClimbed":        records = await client.queryFloorsClimbed(since: since, to: to)
-                case "queryEnergyScore":          records = await client.queryEnergyScore(since: since, to: to)
                 case "queryBodyTemperature":      records = await client.queryBodyTemperature(since: since, to: to)
                 case "querySkinTemperature":      records = await client.querySkinTemperature(since: since, to: to)
-                case "queryIrregularHeartRhythm": records = await client.queryIrregularHeartRhythm(since: since, to: to)
-                case "queryMenstrualFlow":        records = await client.queryMenstrualFlow(since: since, to: to)
-                case "queryStateOfMind":          records = await client.queryStateOfMind(since: since, to: to)
-                case "queryEcg":                  records = await client.queryEcg(since: since, to: to)
-                case "queryAudiogram":            records = await client.queryAudiogram(since: since, to: to)
-                case "queryHeartbeatSeries":      records = await client.queryHeartbeatSeries(since: since, to: to)
-                case "queryWorkoutRoutes":        records = await client.queryWorkoutRoutes(since: since, to: to)
                 case "queryMedication":
                     if #available(iOS 26.0, *) { records = await client.queryMedication(since: since, to: to) }
                     else { records = [] }
                 default:                          records = []
-                }
-                DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
-            }
-
-        case "queryQuantity", "queryCategory", "querySymptom", "queryReproductive", "queryClinical":
-            guard let args = call.arguments as? [String: Any],
-                  let type    = args["type"]  as? String,
-                  let sinceMs = args["since"] as? Int,
-                  let toMs    = args["to"]    as? Int else {
-                result(FlutterError(code: "INVALID_ARGS", message: "type/since/to required", details: nil))
-                return
-            }
-            let since = Date(timeIntervalSince1970: Double(sinceMs) / 1000.0)
-            let to    = Date(timeIntervalSince1970: Double(toMs)    / 1000.0)
-            let method = call.method
-            Task {
-                let records: [HealthRecord]
-                switch method {
-                case "queryCategory":     records = await client.queryCategory(type: type, since: since, to: to)
-                case "querySymptom":      records = await client.querySymptom(type: type, since: since, to: to)
-                case "queryReproductive": records = await client.queryReproductive(type: type, since: since, to: to)
-                case "queryClinical":     records = await client.queryClinical(type: type, since: since, to: to)
-                default:                  records = await client.queryQuantity(type: type, since: since, to: to)
                 }
                 DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
             }

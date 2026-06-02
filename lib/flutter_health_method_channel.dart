@@ -84,16 +84,8 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
       _queryList('queryWaterIntake', since, to);
 
   @override
-  Future<List<HealthRecord>> querySleepApnea(DateTime since, DateTime to) =>
-      _queryList('querySleepApnea', since, to);
-
-  @override
   Future<List<HealthRecord>> queryFloorsClimbed(DateTime since, DateTime to) =>
       _queryList('queryFloorsClimbed', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryEnergyScore(DateTime since, DateTime to) =>
-      _queryList('queryEnergyScore', since, to);
 
   @override
   Future<List<HealthRecord>> queryBodyTemperature(DateTime since, DateTime to) =>
@@ -104,70 +96,14 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
       _queryList('querySkinTemperature', since, to);
 
   @override
-  Future<List<HealthRecord>> queryIrregularHeartRhythm(DateTime since, DateTime to) =>
-      _queryList('queryIrregularHeartRhythm', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryQuantity(String type, DateTime since, DateTime to) =>
-      _queryTyped('queryQuantity', type, since, to);
-
-  @override
-  Future<List<HealthRecord>> queryCategory(String type, DateTime since, DateTime to) =>
-      _queryTyped('queryCategory', type, since, to);
-
-  @override
-  Future<List<HealthRecord>> querySymptom(String type, DateTime since, DateTime to) =>
-      _queryTyped('querySymptom', type, since, to);
-
-  @override
-  Future<List<HealthRecord>> queryMenstrualFlow(DateTime since, DateTime to) =>
-      _queryList('queryMenstrualFlow', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryStateOfMind(DateTime since, DateTime to) =>
-      _queryList('queryStateOfMind', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryEcg(DateTime since, DateTime to) =>
-      _queryList('queryEcg', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryReproductive(String type, DateTime since, DateTime to) =>
-      _queryTyped('queryReproductive', type, since, to);
-
-  @override
-  Future<List<HealthRecord>> queryAudiogram(DateTime since, DateTime to) =>
-      _queryList('queryAudiogram', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryHeartbeatSeries(DateTime since, DateTime to) =>
-      _queryList('queryHeartbeatSeries', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryWorkoutRoutes(DateTime since, DateTime to) =>
-      _queryList('queryWorkoutRoutes', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryClinical(String type, DateTime since, DateTime to) =>
-      _queryTyped('queryClinical', type, since, to);
-
-  @override
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>
       _queryList('queryMedication', since, to);
 
-  Future<List<HealthRecord>> _queryTyped(String method, String type, DateTime since, DateTime to) async {
-    final List? result;
-    try {
-      result = await methodChannel.invokeMethod<List>(method, {
-        'type': type,
-        'since': since.millisecondsSinceEpoch,
-        'to': to.millisecondsSinceEpoch,
-      });
-    } on MissingPluginException {
-      return const [];
-    }
-    return (result ?? []).map((e) => HealthRecord.fromMap(e as Map)).toList();
-  }
+  /// 채널 결과를 HealthRecord 리스트로 변환하고 timestamp 내림차순(최신 먼저)으로 정렬해 반환.
+  /// 모든 list 쿼리(_queryList/_queryTyped)의 공통 반환 — 컨슈머는 항상 최신 데이터부터 받는다.
+  List<HealthRecord> _toRecordsNewestFirst(List? result) =>
+      (result ?? []).map((e) => HealthRecord.fromMap(e as Map)).toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
   Future<List<HealthRecord>> _queryList(String method, DateTime since, DateTime to) async {
     final List? result;
@@ -180,6 +116,6 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
       // iOS HealthKit 미구현 메서드 등 platform-not-implemented 케이스는 빈 리스트로 변환.
       return const [];
     }
-    return (result ?? []).map((e) => HealthRecord.fromMap(e as Map)).toList();
+    return _toRecordsNewestFirst(result);
   }
 }

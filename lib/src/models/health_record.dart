@@ -10,12 +10,9 @@ import 'blood_glucose_value.dart';
 import 'blood_pressure_value.dart';
 import 'nutrition_value.dart';
 import 'water_intake_value.dart';
-import 'sleep_apnea_value.dart';
 import 'floors_climbed_value.dart';
-import 'energy_score_value.dart';
 import 'body_temperature_value.dart';
 import 'skin_temperature_value.dart';
-import 'heart_rhythm_value.dart';
 
 class HealthRecord {
   static const String typeMetric = 'metric';
@@ -28,12 +25,9 @@ class HealthRecord {
   static const String typeBloodPressure = 'blood_pressure';
   static const String typeNutrition = 'nutrition';
   static const String typeWaterIntake = 'water_intake';
-  static const String typeSleepApnea = 'sleep_apnea';
   static const String typeFloorsClimbed = 'floors_climbed';
-  static const String typeEnergyScore = 'energy_score';
   static const String typeBodyTemperature = 'body_temperature';
   static const String typeSkinTemperature = 'skin_temperature';
-  static const String typeHeartRhythm = 'heart_rhythm';
 
   final String dataType;
   final int timestamp;
@@ -81,18 +75,12 @@ class HealthRecord {
       dataType == typeNutrition ? NutritionValue.fromJson(_decoded()) : null;
   WaterIntakeValue? get asWaterIntake =>
       dataType == typeWaterIntake ? WaterIntakeValue.fromJson(_decoded()) : null;
-  SleepApneaValue? get asSleepApnea =>
-      dataType == typeSleepApnea ? SleepApneaValue.fromJson(_decoded()) : null;
   FloorsClimbedValue? get asFloorsClimbed =>
       dataType == typeFloorsClimbed ? FloorsClimbedValue.fromJson(_decoded()) : null;
-  EnergyScoreValue? get asEnergyScore =>
-      dataType == typeEnergyScore ? EnergyScoreValue.fromJson(_decoded()) : null;
   BodyTemperatureValue? get asBodyTemperature =>
       dataType == typeBodyTemperature ? BodyTemperatureValue.fromJson(_decoded()) : null;
   SkinTemperatureValue? get asSkinTemperature =>
       dataType == typeSkinTemperature ? SkinTemperatureValue.fromJson(_decoded()) : null;
-  HeartRhythmValue? get asHeartRhythm =>
-      dataType == typeHeartRhythm ? HeartRhythmValue.fromJson(_decoded()) : null;
 
   @override
   String toString() => 'HealthRecord(dataType: $dataType, timestamp: $timestamp, source: $source)';

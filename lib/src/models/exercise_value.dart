@@ -71,7 +71,6 @@ class SwimmingInfo {
   final String? poolLengthUnit;
   final double? totalDistance;
   final int? totalDurationSec;
-  // PM 6 — iOS HKMetadataKey 매핑 추가:
   final String? locationType;   // "Pool" | "OpenWater"  (HKMetadataKeySwimmingLocationType)
   final String? strokeStyle;    // "Unknown" | "Mixed" | "Freestyle" | "Backstroke" |
                                 // "Breaststroke" | "Butterfly" | "Kickboard"
@@ -256,7 +255,7 @@ class ExerciseValue {
   final List<ExerciseLogPoint>? log;
   final SwimmingInfo? swimming;
 
-  // PM 6 (A안 envelope 임베드) — iOS 측 HKWorkout 부속 정보 직접 임베드.
+  // iOS HKWorkout 부속 정보 직접 임베드.
   /// 운동 중 시점 이벤트 (pause/resume/lap/marker/segment). iOS `HKWorkoutEvent`.
   final List<ExerciseEventValue>? events;
   /// 멀티세그먼트 활동 (트라이애슬론 등). iOS 16+ `HKWorkoutActivity`.

@@ -70,15 +70,7 @@ class MockFlutterHealthPlatform
       Future.value([]);
 
   @override
-  Future<List<HealthRecord>> querySleepApnea(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
   Future<List<HealthRecord>> queryFloorsClimbed(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryEnergyScore(DateTime since, DateTime to) =>
       Future.value([]);
 
   @override
@@ -87,54 +79,6 @@ class MockFlutterHealthPlatform
 
   @override
   Future<List<HealthRecord>> querySkinTemperature(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryIrregularHeartRhythm(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryQuantity(String type, DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryCategory(String type, DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> querySymptom(String type, DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryMenstrualFlow(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryStateOfMind(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryEcg(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryReproductive(String type, DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryAudiogram(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryHeartbeatSeries(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryWorkoutRoutes(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryClinical(String type, DateTime since, DateTime to) =>
       Future.value([]);
 
   @override

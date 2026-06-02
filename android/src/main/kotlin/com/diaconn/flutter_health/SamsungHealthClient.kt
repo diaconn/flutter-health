@@ -500,22 +500,6 @@ class SamsungHealthClient(private val context: Context) {
             )
         }
 
-    /** [since]~[to] 구간 내 모든 수면 무호흡 기록. */
-    suspend fun querySleepApnea(since: Long, to: Long): List<HealthRecord> =
-        readPoints(since, to, DataTypes.SLEEP_APNEA, "수면 무호흡") { point, startMs, endMs, tz, now ->
-            val sign = runCatching { point.getValue(DataType.SleepApneaType.DETECTED_SIGN) }
-                .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase() ?: return@readPoints null
-            HealthRecord(
-                dataType = DATA_TYPE_SLEEP_APNEA,
-                timestamp = startMs,
-                endTimestamp = endMs,
-                tzOffset = tz,
-                source = SOURCE,
-                valueJson = json.encodeToString(SleepApneaValue(detectedSign = sign)),
-                createdAt = now,
-            )
-        }
-
     /** [since]~[to] 구간 내 모든 계단 기록. */
     suspend fun queryFloorsClimbed(since: Long, to: Long): List<HealthRecord> =
         readPoints(since, to, DataTypes.FLOORS_CLIMBED, "계단") { point, startMs, endMs, tz, now ->
@@ -531,39 +515,6 @@ class SamsungHealthClient(private val context: Context) {
                 createdAt = now,
             )
         }
-
-    /** [since]~[to] 구간의 일별 에너지 점수 목록. ENERGY_SCORE 만 LocalDateBuilder 사용. */
-    suspend fun queryEnergyScore(since: Long, to: Long): List<HealthRecord> {
-        val s = store ?: return emptyList()
-        return runCatching {
-            val zone = ZoneId.systemDefault()
-            val startDate = Instant.ofEpochMilli(since).atZone(zone).toLocalDate()
-            val endDate = Instant.ofEpochMilli(to).atZone(zone).toLocalDate()
-            // 양쪽 inclusive 명시 — 2-arg 오버로드는 기본값이 불확실해 다음날 데이터까지 새는 위험 있음.
-            val filter = LocalDateFilter.of(startDate, endDate, true, true)
-            val request = DataTypes.ENERGY_SCORE.readDataRequestBuilder
-                .setLocalDateFilter(filter).build()
-            val tz = currentTzOffset()
-            val now = System.currentTimeMillis()
-            s.readData(request).dataList
-                .sortedBy { it.startTime?.toEpochMilli() ?: 0L }
-                .mapNotNull { point ->
-                    val score = runCatching { point.getValue(DataType.EnergyScoreType.ENERGY_SCORE) }.getOrNull()
-                    if (score == null || score <= 0f) return@mapNotNull null
-                    val startMs = point.startTime?.toEpochMilli() ?: since
-                    val endMs = point.endTime?.toEpochMilli() ?: startMs
-                    HealthRecord(
-                        dataType = DATA_TYPE_ENERGY_SCORE,
-                        timestamp = startMs,
-                        endTimestamp = endMs,
-                        tzOffset = tz,
-                        source = SOURCE,
-                        valueJson = json.encodeToString(EnergyScoreValue(score = score.toDouble())),
-                        createdAt = now,
-                    )
-                }
-        }.onFailure { Log.e(TAG, "에너지 점수 조회 실패", it) }.getOrDefault(emptyList())
-    }
 
     /** [since]~[to] 구간 내 모든 체온 측정 목록. */
     suspend fun queryBodyTemperature(since: Long, to: Long): List<HealthRecord> =
@@ -591,7 +542,6 @@ class SamsungHealthClient(private val context: Context) {
                 ?.toDouble()?.takeIf { it > -999.0 }
             val max = runCatching { point.getValue(DataType.SkinTemperatureType.MAX_SKIN_TEMPERATURE) }.getOrNull()
                 ?.toDouble()?.takeIf { it > -999.0 }
-            // 피부 온도는 영하도 valid (콜드 환경). -1000 sentinel 만 거름.
             val series = runCatching { point.getValue(DataType.SkinTemperatureType.SERIES_DATA) }
                 .getOrNull()?.takeIf { it.isNotEmpty() }?.map {
                     SkinTemperatureSeriesEntry(
@@ -613,22 +563,6 @@ class SamsungHealthClient(private val context: Context) {
                 valueJson = json.encodeToString(SkinTemperatureValue(
                     temperature = avg, min = min, max = max, series = series
                 )),
-                createdAt = now,
-            )
-        }
-
-    /** [since]~[to] 구간 내 부정맥 알림 기록. */
-    suspend fun queryIrregularHeartRhythm(since: Long, to: Long): List<HealthRecord> =
-        readPoints(since, to, DataTypes.IRREGULAR_HEART_RHYTHM_NOTIFICATION, "부정맥") { point, startMs, endMs, tz, now ->
-            val status = runCatching { point.getValue(DataType.IrregularHeartRhythmNotificationType.STATUS) }
-                .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase() ?: return@readPoints null
-            HealthRecord(
-                dataType = DATA_TYPE_HEART_RHYTHM,
-                timestamp = startMs,
-                endTimestamp = endMs,
-                tzOffset = tz,
-                source = SOURCE,
-                valueJson = json.encodeToString(HeartRhythmValue(status = status)),
                 createdAt = now,
             )
         }
@@ -793,14 +727,6 @@ class SamsungHealthClient(private val context: Context) {
 
         val durationMs = session?.duration?.toMillis() ?: (endMs - startMs)
         val heartRateAvg = session?.meanHeartRate?.let { if (it > 0f) it.toInt() else null }
-
-        Log.d(
-            TAG,
-            "[운동매핑확인] 원본=${exerciseType.name}(ordinal=${exerciseType.ordinal})" +
-                " → 앱값=${mapExerciseType(exerciseType)}" +
-                " | 시작=${point.startTime} 종료=${point.endTime}" +
-                " 지속=${durationMs / 60000}분 칼로리=${session?.calories} 거리=${session?.distance}m"
-        )
 
         // Samsung 은 "측정 안 됨" 을 -1000 sentinel 또는 0 으로 표현한다.
         // altitude 는 음수 정상값 가능(해수면 아래)하므로 -999 초과만 valid 로 본다.
@@ -1114,14 +1040,10 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class WaterIntakeValue(val amount: Double)
 
-    @Serializable
-    private data class SleepApneaValue(val detectedSign: String)
 
     @Serializable
     private data class FloorsClimbedValue(val floor: Double)
 
-    @Serializable
-    private data class EnergyScoreValue(val score: Double)
 
     @Serializable
     private data class BodyTemperatureValue(val temperature: Double)
@@ -1143,8 +1065,6 @@ class SamsungHealthClient(private val context: Context) {
         val series: List<SkinTemperatureSeriesEntry>?
     )
 
-    @Serializable
-    private data class HeartRhythmValue(val status: String)
 
     companion object {
         const val DATA_TYPE_METRIC = "metric"
@@ -1157,12 +1077,9 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_BLOOD_PRESSURE = "blood_pressure"
         const val DATA_TYPE_NUTRITION = "nutrition"
         const val DATA_TYPE_WATER_INTAKE = "water_intake"
-        const val DATA_TYPE_SLEEP_APNEA = "sleep_apnea"
         const val DATA_TYPE_FLOORS_CLIMBED = "floors_climbed"
-        const val DATA_TYPE_ENERGY_SCORE = "energy_score"
         const val DATA_TYPE_BODY_TEMPERATURE = "body_temperature"
         const val DATA_TYPE_SKIN_TEMPERATURE = "skin_temperature"
-        const val DATA_TYPE_HEART_RHYTHM = "heart_rhythm"
         const val SOURCE = "samsung_health"
 
         private const val TAG = "FlutterHealth"
@@ -1180,12 +1097,9 @@ class SamsungHealthClient(private val context: Context) {
             Permission.of(DataTypes.BLOOD_PRESSURE, AccessType.READ),
             Permission.of(DataTypes.NUTRITION, AccessType.READ),
             Permission.of(DataTypes.WATER_INTAKE, AccessType.READ),
-            Permission.of(DataTypes.SLEEP_APNEA, AccessType.READ),
             Permission.of(DataTypes.FLOORS_CLIMBED, AccessType.READ),
-            Permission.of(DataTypes.ENERGY_SCORE, AccessType.READ),
             Permission.of(DataTypes.BODY_TEMPERATURE, AccessType.READ),
             Permission.of(DataTypes.SKIN_TEMPERATURE, AccessType.READ),
-            Permission.of(DataTypes.IRREGULAR_HEART_RHYTHM_NOTIFICATION, AccessType.READ),
             Permission.of(DataTypes.EXERCISE_LOCATION, AccessType.READ),
         )
     }
