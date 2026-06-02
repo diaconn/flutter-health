@@ -92,15 +92,15 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
       _queryList('queryBodyTemperature', since, to);
 
   @override
-  Future<List<HealthRecord>> querySkinTemperature(DateTime since, DateTime to) =>
-      _queryList('querySkinTemperature', since, to);
+  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
+      _queryList('queryStepSegments', since, to);
 
   @override
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>
       _queryList('queryMedication', since, to);
 
   /// 채널 결과를 HealthRecord 리스트로 변환하고 timestamp 내림차순(최신 먼저)으로 정렬해 반환.
-  /// 모든 list 쿼리(_queryList/_queryTyped)의 공통 반환 — 컨슈머는 항상 최신 데이터부터 받는다.
+  /// 모든 list 쿼리(_queryList)의 공통 반환 — 컨슈머는 항상 최신 데이터부터 받는다.
   List<HealthRecord> _toRecordsNewestFirst(List? result) =>
       (result ?? []).map((e) => HealthRecord.fromMap(e as Map)).toList()
         ..sort((a, b) => b.timestamp.compareTo(a.timestamp));

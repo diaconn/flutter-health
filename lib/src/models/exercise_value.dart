@@ -1,35 +1,3 @@
-class ExerciseRoutePoint {
-  final double latitude;
-  final double longitude;
-  final double? altitude;
-  final double? accuracy;
-  final int timestampMs;
-
-  const ExerciseRoutePoint({
-    required this.latitude,
-    required this.longitude,
-    this.altitude,
-    this.accuracy,
-    required this.timestampMs,
-  });
-
-  factory ExerciseRoutePoint.fromJson(Map<String, dynamic> json) => ExerciseRoutePoint(
-        latitude: (json['latitude'] as num).toDouble(),
-        longitude: (json['longitude'] as num).toDouble(),
-        altitude: (json['altitude'] as num?)?.toDouble(),
-        accuracy: (json['accuracy'] as num?)?.toDouble(),
-        timestampMs: (json['timestampMs'] as num).toInt(),
-      );
-
-  Map<String, dynamic> toJson() => {
-        'latitude': latitude,
-        'longitude': longitude,
-        if (altitude != null) 'altitude': altitude,
-        if (accuracy != null) 'accuracy': accuracy,
-        'timestampMs': timestampMs,
-      };
-}
-
 class ExerciseLogPoint {
   final int timestampMs;
   final double? heartRate;
@@ -251,7 +219,6 @@ class ExerciseValue {
   final double? meanRpm;
   final String? comment;
   final String? customTitle;
-  final List<ExerciseRoutePoint>? route;
   final List<ExerciseLogPoint>? log;
   final SwimmingInfo? swimming;
 
@@ -302,7 +269,6 @@ class ExerciseValue {
     this.meanRpm,
     this.comment,
     this.customTitle,
-    this.route,
     this.log,
     this.swimming,
     this.events,
@@ -344,9 +310,6 @@ class ExerciseValue {
         meanRpm: (json['meanRpm'] as num?)?.toDouble(),
         comment: json['comment'] as String?,
         customTitle: json['customTitle'] as String?,
-        route: (json['route'] as List?)
-            ?.map((e) => ExerciseRoutePoint.fromJson(e as Map<String, dynamic>))
-            .toList(),
         log: (json['log'] as List?)
             ?.map((e) => ExerciseLogPoint.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -398,7 +361,6 @@ class ExerciseValue {
         if (meanRpm != null) 'meanRpm': meanRpm,
         if (comment != null) 'comment': comment,
         if (customTitle != null) 'customTitle': customTitle,
-        if (route != null) 'route': route!.map((e) => e.toJson()).toList(),
         if (log != null) 'log': log!.map((e) => e.toJson()).toList(),
         if (swimming != null) 'swimming': swimming!.toJson(),
         if (events != null) 'events': events!.map((e) => e.toJson()).toList(),

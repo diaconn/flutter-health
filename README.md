@@ -97,14 +97,14 @@ if (record != null) {
 | `disconnect()` | 연결 해제 |
 | `isPermissionGranted()` | 권한 부여 여부 확인 |
 | `requestPermission()` | 권한 요청 UI 표시 |
-| `queryMetric(from, to)` | 지정 구간 5분 지표(HR·걸음·칼로리·거리·SpO2·HRV) |
+| `queryMetric(from, to)` | 지정 구간 5분 지표(HR·걸음·칼로리·거리) |
 | `queryEndedSleepSessions(since, to)` | 구간 내 종료된 수면 세션 목록 |
 | `queryEndedExerciseSessions(since, to)` | 구간 내 종료된 운동 세션 목록 |
 | `queryHourlySummary(hourStart, hourEnd)` | 1시간 집계 (HR·걸음·칼로리·거리) |
 | `queryDailySummary(date)` | 1일 집계 (HR·걸음·칼로리·거리·수면·운동) |
 | `queryWeights(since, to)` | 구간 내 모든 체중 측정 목록 최신순 (weight·BMI·체지방률) |
 
-> 모든 list 반환 쿼리(`queryWeights`, `queryBloodGlucose`, `queryQuantity` 등)는 **최신순(timestamp 내림차순)** 으로 정렬되어 반환됩니다.
+> 모든 list 반환 쿼리(`queryWeights`, `queryBloodGlucose`, `queryStepSegments` 등)는 **최신순(timestamp 내림차순)** 으로 정렬되어 반환됩니다.
 
 ---
 
@@ -216,7 +216,6 @@ final sessions = await health.queryEndedSleepSessions(from, to);
 | 항목 | Android | iOS |
 |---|---|---|
 | source | `samsung_health` | `apple_health` |
-| HRV | 항상 null (Samsung Health SDK 미지원) | SDNN ms |
 | 백그라운드 정확한 5분 루프 | WorkManager로 구현 가능 | OS 재량 (`BGAppRefreshTask`) — 정확도 보장 불가 |
 | 운동 `strength_training` | 삼성헬스 미지원 → `other` | `.traditionalStrengthTraining` 등 매핑 |
 | 거리 | 모든 활동 포함 | 걷기·달리기만 (`distanceWalkingRunning`) |

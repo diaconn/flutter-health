@@ -1,6 +1,5 @@
 import Foundation
 import HealthKit
-import CoreLocation
 import os
 
 /// Apple HealthKit 데이터 래퍼 (diaconn-aid-ios/HealthKitClient.swift 포팅 — diaconn 의존성 제거).
@@ -34,17 +33,9 @@ final class HealthKitClient: @unchecked Sendable {
         logger.info("requestPermission: requesting \(types.count) read types")
         try await store.requestAuthorization(toShare: [], read: types)
         logger.info("requestPermission: requestAuthorization completed")
-
-        // 복약(iOS 26+)은 일반 read set 에 넣으면 크래시 → per-object 권한을 따로 요청한다.
-        // 사용자가 약별로 허용해야 queryMedication 이 읽을 수 있고, 실패/취소해도 전체 흐름은 성공 처리.
-        if #available(iOS 26.0, *) {
-            do {
-                try await store.requestPerObjectReadAuthorization(for: HKObjectType.userAnnotatedMedicationType(), predicate: nil)
-                logger.info("requestPermission: medication per-object auth completed")
-            } catch {
-                logger.info("requestPermission: medication per-object auth skipped/failed: \(error.localizedDescription)")
-            }
-        }
+        // 복약(iOS 26+) per-object 권한은 여기서 요청하지 않는다 — 표준 권한 시트가 닫히는 순간
+        // 곧바로 요청하면 표시 컨텍스트 경합으로 await 가 안 끝나 requestPermission 전체가 멈춘다(hang).
+        // 대신 queryMedication 호출 시점(깨끗한 컨텍스트)에 비차단으로 요청한다.
         return true
     }
 
@@ -63,8 +54,6 @@ final class HealthKitClient: @unchecked Sendable {
         async let basalDaily = querySumBucketed(.basalEnergyBurned, unit: .kilocalorie(), bucketStart: dayStart, interval: dayInterval)
         async let distanceInterval = querySumQuantity(.distanceWalkingRunning, unit: .meter(), from: from, to: to)
         async let distanceDaily = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: dayStart, interval: dayInterval)
-        async let spO2 = queryAvgQuantity(.oxygenSaturation, unit: .percent(), from: from, to: to)
-        async let hrv = queryAvgQuantity(.heartRateVariabilitySDNN, unit: HKUnit(from: "ms"), from: from, to: to)
 
         // 한 번에 await 하면 타입체커가 못 풀어 개별 await.
         let hr = await hrStats
@@ -76,8 +65,6 @@ final class HealthKitClient: @unchecked Sendable {
         let bd = await basalDaily
         let di = await distanceInterval
         let dd = await distanceDaily
-        let sp = await spO2
-        let h = await hrv
 
         // total = basal + active (둘 중 하나만 있으면 그것만, 둘 다 nil 이면 nil)
         func sumOptional(_ a: Double?, _ b: Double?) -> Double? {
@@ -87,7 +74,7 @@ final class HealthKitClient: @unchecked Sendable {
         let totalInterval = sumOptional(ai, bi)
         let totalDaily = sumOptional(ad, bd)
 
-        if hr.avg == nil && si == nil && ai == nil && bi == nil && di == nil && sp == nil {
+        if hr.avg == nil && si == nil && ai == nil && bi == nil && di == nil {
             return nil
         }
 
@@ -102,9 +89,7 @@ final class HealthKitClient: @unchecked Sendable {
             caloriesActiveInterval: ai,
             caloriesActiveDaily: ad,
             distanceInterval: di,
-            distanceDaily: dd,
-            spO2: sp.map { Int($0 * 100) },
-            hrv: h
+            distanceDaily: dd
         )
         return HealthRecord(
             dataType: Self.dataTypeMetric,
@@ -169,7 +154,7 @@ final class HealthKitClient: @unchecked Sendable {
         return records
     }
 
-    /// HKWorkout 의 statistics·events·activities·metadata·device·route 를 한 레코드로 통합.
+    /// HKWorkout 의 statistics·events·activities·metadata·device 를 한 레코드로 통합.
     private func buildExerciseRecord(_ workout: HKWorkout, tz: String) async -> HealthRecord? {
         let startMs = toMs(workout.startDate)
         let endMs = toMs(workout.endDate)
@@ -311,16 +296,6 @@ final class HealthKitClient: @unchecked Sendable {
             )
         }
 
-        // route (async, 워크아웃당 1회 round-trip) + min/max altitude 도 GPS 에서 산출
-        if let points = await fetchRoutePointsForWorkout(workout), !points.isEmpty {
-            v.route = points
-            let alts = points.compactMap { $0.altitude }
-            if !alts.isEmpty {
-                v.maxAltitude = alts.max()
-                v.minAltitude = alts.min()
-            }
-        }
-
         return HealthRecord(
             dataType: Self.dataTypeExercise,
             timestamp: startMs,
@@ -330,30 +305,6 @@ final class HealthKitClient: @unchecked Sendable {
             valueJson: encodeToJson(v),
             createdAt: toMs(Date())
         )
-    }
-
-    /// HKWorkout 에 첨부된 모든 HKWorkoutRoute 를 합쳐 평탄화된 좌표 배열 반환. 없으면 nil.
-    private func fetchRoutePointsForWorkout(_ workout: HKWorkout) async -> [ExerciseRoutePointValue]? {
-        let predicate = HKQuery.predicateForObjects(from: workout)
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [.workoutRoute(predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
-        )
-        guard let routes = try? await descriptor.result(for: store), !routes.isEmpty else { return nil }
-        var all: [ExerciseRoutePointValue] = []
-        for route in routes {
-            let locs = await fetchRouteLocations(route)
-            for loc in locs {
-                all.append(ExerciseRoutePointValue(
-                    latitude: loc.coordinate.latitude,
-                    longitude: loc.coordinate.longitude,
-                    altitude: loc.verticalAccuracy >= 0 ? loc.altitude : nil,
-                    accuracy: loc.horizontalAccuracy >= 0 ? loc.horizontalAccuracy : nil,
-                    timestampMs: Int64(loc.timestamp.timeIntervalSince1970 * 1000)
-                ))
-            }
-        }
-        return all.isEmpty ? nil : all
     }
 
     /// HKWorkoutEventType → 문자열 매핑 (Android 패턴과 통일).
@@ -811,48 +762,48 @@ final class HealthKitClient: @unchecked Sendable {
     }
 
     func queryWaterIntake(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.dietaryWater, unit: .literUnit(with: .milli), dataType: Self.dataTypeWaterIntake, since: since, to: to) { v in
+        await queryQuantitySamples(.dietaryWater, unit: .literUnit(with: .milli), dataType: Self.dataTypeWaterIntake, since: since, to: to) { v, _ in
             v > 0 ? WaterIntakeValue(amount: v) : nil
         }
     }
 
     func queryFloorsClimbed(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.flightsClimbed, unit: .count(), dataType: Self.dataTypeFloorsClimbed, since: since, to: to) { v in
+        await queryQuantitySamples(.flightsClimbed, unit: .count(), dataType: Self.dataTypeFloorsClimbed, since: since, to: to) { v, _ in
             v > 0 ? FloorsClimbedValue(floor: v) : nil
         }
     }
 
     func queryBodyTemperature(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.bodyTemperature, unit: .degreeCelsius(), dataType: Self.dataTypeBodyTemperature, since: since, to: to) { v in
+        await queryQuantitySamples(.bodyTemperature, unit: .degreeCelsius(), dataType: Self.dataTypeBodyTemperature, since: since, to: to) { v, _ in
             v > 0 ? BodyTemperatureValue(temperature: v) : nil
         }
     }
 
-    /// iOS 는 수면 중 손목 온도(.appleSleepingWristTemperature)로 피부 온도를 근사한다.
-    func querySkinTemperature(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.appleSleepingWristTemperature, unit: .degreeCelsius(), dataType: Self.dataTypeSkinTemperature, since: since, to: to) { v in
-            v > 0 ? SkinTemperatureValue(temperature: v, min: nil, max: nil) : nil
+    /// 개별 걸음 샘플(stepCount)을 각각 시작/종료/걸음수로 반환. 합산(metric.stepsDaily)과 달리
+    /// 건강 앱 상세목록의 개별 기록을 그대로 노출한다. iPhone·워치가 각각 기록하면 시간이 겹치는
+    /// 샘플이 함께 나오므로(sourceType 으로 구분), 단순 합은 stepsDaily 와 다를 수 있다.
+    func queryStepSegments(since: Date, to: Date) async -> [HealthRecord] {
+        await queryQuantitySamples(.stepCount, unit: .count(), dataType: Self.dataTypeStepSegment, since: since, to: to) { v, sample in
+            let count = Int(v)
+            return count > 0 ? StepSegmentValue(count: count, sourceType: Self.stepSourceType(sample)) : nil
         }
     }
 
-    private func fetchRouteLocations(_ route: HKWorkoutRoute) async -> [CLLocation] {
-        await withCheckedContinuation { continuation in
-            var all: [CLLocation] = []
-            var resumed = false
-            let query = HKWorkoutRouteQuery(route: route) { _, locations, done, error in
-                if let locations = locations { all.append(contentsOf: locations) }
-                if (done || error != nil) && !resumed {
-                    resumed = true
-                    continuation.resume(returning: all)
-                }
-            }
-            self.store.execute(query)
-        }
+    /// HealthKit 샘플의 기록 기기 종류를 단순 분류한다. 사용자 지정 기기명(예: "OO의 iPhone") 대신
+    /// "phone"|"watch"|"tablet"|"other" 로 정규화 — 소스가 사용자별로 달라 경우의 수가 폭발하는 것을 막는다.
+    /// 모델 식별자(예: "iPhone14,5", "Watch6,18") 또는 HKDevice 이름("iPhone"/"Apple Watch")으로 판별.
+    private static func stepSourceType(_ sample: HKSample) -> String {
+        let raw = (sample.device?.name ?? sample.sourceRevision.productType ?? "").lowercased()
+        if raw.contains("watch") { return "watch" }
+        if raw.contains("iphone") { return "phone" }
+        if raw.contains("ipad") { return "tablet" }
+        return "other"
     }
 
     /// 특수: 복약 이벤트(medication, iOS 26+). 복용 상태/용량을 수집한다. 약 이름은 미포함.
     @available(iOS 26.0, *)
     func queryMedication(since: Date, to: Date) async -> [HealthRecord] {
+        requestMedicationAuthorization()   // per-object 권한 lazy 요청 (비차단 — hang 방지)
         let type = HKObjectType.medicationDoseEventType()
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         return await withCheckedContinuation { continuation in
@@ -885,6 +836,18 @@ final class HealthKitClient: @unchecked Sendable {
                 if !resumed { resumed = true; continuation.resume(returning: records) }
             }
             self.store.execute(query)
+        }
+    }
+
+    /// 복약(iOS 26+) per-object 권한을 fire-and-forget 로 요청한다.
+    /// await 하지 않으므로(표시 컨텍스트 경합 시 멈출 수 있음) 호출자(queryMedication)를 절대 막지 않는다.
+    /// 권한 부여 전 첫 조회는 빈 결과일 수 있고, 시트에서 허용 후 다시 조회하면 데이터가 잡힌다.
+    @available(iOS 26.0, *)
+    private func requestMedicationAuthorization() {
+        Task { [weak self] in
+            guard let self else { return }
+            try? await self.store.requestPerObjectReadAuthorization(
+                for: HKObjectType.userAnnotatedMedicationType(), predicate: nil)
         }
     }
 
@@ -927,26 +890,23 @@ final class HealthKitClient: @unchecked Sendable {
     }
 
     private var readTypes: Set<HKObjectType> {
-        var types: Set<HKObjectType> = [
+        let types: Set<HKObjectType> = [
         HKObjectType.quantityType(forIdentifier: .heartRate)!,
         HKObjectType.quantityType(forIdentifier: .stepCount)!,
         HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
         HKObjectType.quantityType(forIdentifier: .basalEnergyBurned)!,   // metric/daily 의 caloriesBasal
         HKObjectType.quantityType(forIdentifier: .appleExerciseTime)!,   // daily/hourly 의 activeTime
         HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-        HKObjectType.quantityType(forIdentifier: .oxygenSaturation)!,
-        HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
         HKObjectType.quantityType(forIdentifier: .bodyMass)!,
         HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
         HKObjectType.workoutType(),
-        // 혈당/혈압/수분/계단/체온/피부온도
+        // 혈당/혈압/수분/계단/체온
         HKObjectType.quantityType(forIdentifier: .bloodGlucose)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)!,
         HKObjectType.quantityType(forIdentifier: .dietaryWater)!,
         HKObjectType.quantityType(forIdentifier: .flightsClimbed)!,
         HKObjectType.quantityType(forIdentifier: .bodyTemperature)!,
-        HKObjectType.quantityType(forIdentifier: .appleSleepingWristTemperature)!,
         // 영양(nutrition) 세부 영양소
         HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)!,
         HKObjectType.quantityType(forIdentifier: .dietaryFatTotal)!,
@@ -966,8 +926,7 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .dietaryIron)!
         ]
         // 복약(iOS 26+)은 일반 read set 에 넣으면 크래시 → 여기서 제외하고
-        // requestPermission() 에서 per-object 권한으로 따로 요청한다(없으면 queryMedication 빈 결과).
-        types.insert(HKSeriesType.workoutRoute())   // 운동 세션의 GPS 경로 읽기용
+        // queryMedication 호출 시점에 requestMedicationAuthorization() 로 per-object 권한을 따로 요청한다.
         return types
     }
 
@@ -983,10 +942,6 @@ final class HealthKitClient: @unchecked Sendable {
 
     private func querySumQuantity(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, from: Date, to: Date) async -> Double? {
         await queryStatistics(identifier, options: .cumulativeSum, unit: unit, from: from, to: to) { $0.sumQuantity() }
-    }
-
-    private func queryAvgQuantity(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, from: Date, to: Date) async -> Double? {
-        await queryStatistics(identifier, options: .discreteAverage, unit: unit, from: from, to: to) { $0.averageQuantity() }
     }
 
     /// 일/시 집계 전용 버킷 합산. 단순 overlap-sum 은 경계(자정/정시)를 가로지른 누적 샘플을 전량 더해 over-count 된다.
@@ -1073,7 +1028,7 @@ final class HealthKitClient: @unchecked Sendable {
         dataType: String,
         since: Date,
         to: Date,
-        valueBuilder: (Double) -> T?
+        valueBuilder: (Double, HKQuantitySample) -> T?
     ) async -> [HealthRecord] {
         guard let qt = HKQuantityType.quantityType(forIdentifier: identifier) else { return [] }
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
@@ -1086,7 +1041,7 @@ final class HealthKitClient: @unchecked Sendable {
         let now = toMs(Date())
         return samples.compactMap { sample in
             let v = sample.quantity.doubleValue(for: unit)
-            guard let value = valueBuilder(v) else { return nil }
+            guard let value = valueBuilder(v, sample) else { return nil }
             return HealthRecord(
                 dataType: dataType,
                 timestamp: toMs(sample.startDate),
@@ -1210,8 +1165,6 @@ final class HealthKitClient: @unchecked Sendable {
         let caloriesActiveDaily: Double?
         let distanceInterval: Double?
         let distanceDaily: Double?
-        let spO2: Int?
-        let hrv: Double?
     }
 
     fileprivate struct SleepStageValue: Codable {
@@ -1227,14 +1180,6 @@ final class HealthKitClient: @unchecked Sendable {
         let deepMin: Int?
         let remMin: Int?
         let stages: [SleepStageValue]?
-    }
-
-    fileprivate struct ExerciseRoutePointValue: Codable {
-        let latitude: Double
-        let longitude: Double
-        let altitude: Double?
-        let accuracy: Double?
-        let timestampMs: Int64
     }
 
     fileprivate struct ExerciseSwimmingInfo: Codable {
@@ -1287,8 +1232,6 @@ final class HealthKitClient: @unchecked Sendable {
         var distance: Double? = nil
         var altitudeGain: Double? = nil
         var altitudeLoss: Double? = nil
-        var maxAltitude: Double? = nil
-        var minAltitude: Double? = nil
         var count: Int? = nil
         var countType: String? = nil
         var maxSpeed: Double? = nil
@@ -1297,7 +1240,6 @@ final class HealthKitClient: @unchecked Sendable {
         var meanCadence: Double? = nil
         var maxPower: Double? = nil
         var meanPower: Double? = nil
-        var route: [ExerciseRoutePointValue]? = nil
         var swimming: ExerciseSwimmingInfo? = nil
         var events: [ExerciseEventValue]? = nil
         var activities: [ExerciseActivityValue]? = nil
@@ -1384,10 +1326,9 @@ final class HealthKitClient: @unchecked Sendable {
         let temperature: Double
     }
 
-    fileprivate struct SkinTemperatureValue: Codable {
-        let temperature: Double?
-        let min: Double?
-        let max: Double?
+    fileprivate struct StepSegmentValue: Codable {
+        let count: Int
+        let sourceType: String       // 기록 기기 종류: "phone"|"watch"|"tablet"|"other" (사용자 지정 기기명 대신 정규화)
     }
 
     fileprivate struct MedicationValue: Codable {
@@ -1433,7 +1374,7 @@ final class HealthKitClient: @unchecked Sendable {
     static let dataTypeWaterIntake = "water_intake"
     static let dataTypeFloorsClimbed = "floors_climbed"
     static let dataTypeBodyTemperature = "body_temperature"
-    static let dataTypeSkinTemperature = "skin_temperature"
+    static let dataTypeStepSegment = "step_segment"
     static let dataTypeMedication = "medication"
     static let source = "apple_health"
 }

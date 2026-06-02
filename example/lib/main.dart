@@ -157,6 +157,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         'water_intake'     => await _plugin.queryWaterIntake(since, to),
         'floors_climbed'   => await _plugin.queryFloorsClimbed(since, to),
         'body_temperature' => await _plugin.queryBodyTemperature(since, to),
+        'step_segment'     => await _plugin.queryStepSegments(since, to),    // iOS 전용
         _ => <HealthRecord>[],
       };
       _log('$name → ${records.length} record(s)');
@@ -405,10 +406,11 @@ class _ButtonGrid extends StatelessWidget {
             ),
           ]),
           _section('기본지표', [
-            OutlinedButton(onPressed: onQueryMetric, child: const Text('Metric (걸음·칼로리·거리·심박·SpO2)')),
+            OutlinedButton(onPressed: onQueryMetric, child: const Text('Metric (걸음·칼로리·거리·심박)')),
             OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')),
             OutlinedButton(onPressed: onQueryDaily,  child: const Text('Daily Summary')),
             OutlinedButton(onPressed: () => onQueryByName('floors_climbed'), child: const Text('층수')),
+            OutlinedButton(onPressed: () => onQueryByName('step_segment'),   child: const Text('걸음 구간 (iOS)')),
           ]),
           _section('신체·체성분', [
             OutlinedButton(onPressed: onQueryWeight, child: const Text('체중')),

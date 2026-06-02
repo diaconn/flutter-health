@@ -12,7 +12,7 @@ export 'src/models/nutrition_value.dart';
 export 'src/models/water_intake_value.dart';
 export 'src/models/floors_climbed_value.dart';
 export 'src/models/body_temperature_value.dart';
-export 'src/models/skin_temperature_value.dart';
+export 'src/models/step_segment_value.dart';
 export 'src/models/medication_value.dart';
 
 import 'flutter_health_platform_interface.dart';
@@ -90,9 +90,13 @@ class FlutterHealth {
   Future<List<HealthRecord>> queryBodyTemperature(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryBodyTemperature(since, to);
 
-  /// [since]~[to] 구간 내 모든 피부 온도 (skin_temperature) 측정 목록.
-  Future<List<HealthRecord>> querySkinTemperature(DateTime since, DateTime to) =>
-      FlutterHealthPlatform.instance.querySkinTemperature(since, to);
+  /// iOS 전용. [since]~[to] 구간의 개별 걸음 구간 (step_segment) 목록을 최신순으로 반환.
+  /// metric 의 합산값(stepsDaily)과 달리 각 구간의 시작/종료(envelope timestamp/endTimestamp)
+  /// 와 구간별 걸음수(value.count)를 그대로 준다. iPhone·워치가 각각 기록하면 시간이 겹치는
+  /// 샘플이 함께 나오므로(value.sourceType = phone/watch/tablet/other 로 구분), 단순 합은 stepsDaily 와 다를 수 있다.
+  /// Android(Samsung) 는 미구현이라 빈 리스트.
+  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryStepSegments(since, to);
 
   /// [since]~[to] 구간 복약 이벤트 (medication, iOS 26+) 목록. 그 외 플랫폼/버전은 빈 리스트.
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>

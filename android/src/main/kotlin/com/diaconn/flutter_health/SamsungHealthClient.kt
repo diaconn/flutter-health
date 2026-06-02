@@ -95,7 +95,6 @@ class SamsungHealthClient(private val context: Context) {
         val cadD = async { aggregateActiveCalories(s, dayFilter) }
         val diD = async { aggregateDistance(s, localFilter) }
         val ddD = async { aggregateDistance(s, dayFilter) }
-        val spD = async { readSpO2Avg(s, instantFilter) }
 
         val hrStats = hrD.await()
         val stepsInterval = siD.await()
@@ -106,9 +105,8 @@ class SamsungHealthClient(private val context: Context) {
         val caloriesActiveDaily = cadD.await()
         val distanceInterval = diD.await()
         val distanceDaily = ddD.await()
-        val spO2 = spD.await()
 
-        if (hrStats.avg == null && stepsInterval == null && caloriesInterval == null && distanceInterval == null && spO2 == null) {
+        if (hrStats.avg == null && stepsInterval == null && caloriesInterval == null && distanceInterval == null) {
             return@coroutineScope null
         }
 
@@ -129,9 +127,7 @@ class SamsungHealthClient(private val context: Context) {
                 caloriesActiveInterval = caloriesActiveInterval,
                 caloriesActiveDaily = caloriesActiveDaily,
                 distanceInterval = distanceInterval,
-                distanceDaily = distanceDaily,
-                spO2 = spO2,
-                hrv = null
+                distanceDaily = distanceDaily
             )),
             createdAt = System.currentTimeMillis(),
         )
@@ -532,41 +528,6 @@ class SamsungHealthClient(private val context: Context) {
             )
         }
 
-    /** [since]~[to] 구간 내 모든 피부 온도 측정 목록. */
-    suspend fun querySkinTemperature(since: Long, to: Long): List<HealthRecord> =
-        readPoints(since, to, DataTypes.SKIN_TEMPERATURE, "피부 온도") { point, startMs, endMs, tz, now ->
-            // 피부 온도는 영하도 valid. -1000 sentinel 만 거름.
-            val avg = runCatching { point.getValue(DataType.SkinTemperatureType.SKIN_TEMPERATURE) }.getOrNull()
-                ?.toDouble()?.takeIf { it > -999.0 }
-            val min = runCatching { point.getValue(DataType.SkinTemperatureType.MIN_SKIN_TEMPERATURE) }.getOrNull()
-                ?.toDouble()?.takeIf { it > -999.0 }
-            val max = runCatching { point.getValue(DataType.SkinTemperatureType.MAX_SKIN_TEMPERATURE) }.getOrNull()
-                ?.toDouble()?.takeIf { it > -999.0 }
-            val series = runCatching { point.getValue(DataType.SkinTemperatureType.SERIES_DATA) }
-                .getOrNull()?.takeIf { it.isNotEmpty() }?.map {
-                    SkinTemperatureSeriesEntry(
-                        temperature = it.skinTemperature.toDouble(),
-                        min = it.min.toDouble().takeIf { v -> v > -999.0 },
-                        max = it.max.toDouble().takeIf { v -> v > -999.0 },
-                        startMs = it.startTime.toEpochMilli(),
-                        endMs = it.endTime.toEpochMilli()
-                    )
-                }
-            if (avg == null && min == null && max == null && series == null) return@readPoints null
-
-            HealthRecord(
-                dataType = DATA_TYPE_SKIN_TEMPERATURE,
-                timestamp = startMs,
-                endTimestamp = endMs,
-                tzOffset = tz,
-                source = SOURCE,
-                valueJson = json.encodeToString(SkinTemperatureValue(
-                    temperature = avg, min = min, max = max, series = series
-                )),
-                createdAt = now,
-            )
-        }
-
     // --- Private ---
 
     @Volatile private var store: HealthDataStore? = null
@@ -598,16 +559,6 @@ class SamsungHealthClient(private val context: Context) {
                 max = values.max().toInt().takeIf { it > 0 }
             )
         }.onFailure { Log.e(TAG, "심박수 조회 실패", it) }.getOrDefault(HrStats(null, null, null))
-
-    private suspend fun readSpO2Avg(s: HealthDataStore, filter: InstantTimeFilter): Int? =
-        runCatching {
-            val request = DataTypes.BLOOD_OXYGEN.readDataRequestBuilder.setInstantTimeFilter(filter).build()
-            val values = s.readData(request).dataList
-                .map { it.getValueOrDefault(DataType.BloodOxygenType.OXYGEN_SATURATION, 0f) }
-                .filter { it > 0f }
-            if (values.isEmpty()) null
-            else (values.sum() / values.size).toInt().takeIf { it > 0 }
-        }.onFailure { Log.e(TAG, "SpO2 조회 실패", it) }.getOrDefault(null)
 
     private suspend fun aggregateSteps(s: HealthDataStore, filter: LocalTimeFilter): Int? =
         runCatching {
@@ -734,19 +685,6 @@ class SamsungHealthClient(private val context: Context) {
         fun Float.altitudeOrNull(): Double? = toDouble().takeIf { it > -999.0 }
         fun Float.posOrNull(): Double? = toDouble().takeIf { it > 0.0 }
 
-        // (0,0) 은 GPS lock 전의 sentinel 좌표라 drop. 실제 적도/그리니치 교점 데이터는 의료 운동 데이터로 발생 안 함.
-        val route = session?.route
-            ?.filterNot { it.latitude == 0.0f && it.longitude == 0.0f }
-            ?.takeIf { it.isNotEmpty() }?.map { loc ->
-                ExerciseRoutePoint(
-                    latitude = loc.latitude.toDouble(),
-                    longitude = loc.longitude.toDouble(),
-                    altitude = loc.altitude?.altitudeOrNull(),
-                    accuracy = loc.accuracy?.posOrNull(),
-                    timestampMs = loc.timestamp.toEpochMilli()
-                )
-            }
-
         val log = session?.log?.takeIf { it.isNotEmpty() }?.map { entry ->
             ExerciseLogPoint(
                 timestampMs = entry.timestamp.toEpochMilli(),
@@ -802,7 +740,6 @@ class SamsungHealthClient(private val context: Context) {
                 meanRpm = session?.meanRpm?.posOrNull(),
                 comment = session?.comment?.takeIf { it.isNotBlank() },
                 customTitle = session?.customTitle?.takeIf { it.isNotBlank() },
-                route = route,
                 log = log,
                 swimming = swimming
             )),
@@ -860,9 +797,7 @@ class SamsungHealthClient(private val context: Context) {
         val caloriesActiveInterval: Double?,
         val caloriesActiveDaily: Double?,
         val distanceInterval: Double?,
-        val distanceDaily: Double?,
-        val spO2: Int?,
-        val hrv: Double?
+        val distanceDaily: Double?
     )
 
     @Serializable
@@ -876,15 +811,6 @@ class SamsungHealthClient(private val context: Context) {
         val deepMin: Int?,
         val remMin: Int?,
         val stages: List<SleepStageValue>?
-    )
-
-    @Serializable
-    private data class ExerciseRoutePoint(
-        val latitude: Double,
-        val longitude: Double,
-        val altitude: Double?,
-        val accuracy: Double?,
-        val timestampMs: Long
     )
 
     @Serializable
@@ -935,7 +861,6 @@ class SamsungHealthClient(private val context: Context) {
         val meanRpm: Double?,
         val comment: String?,
         val customTitle: String?,
-        val route: List<ExerciseRoutePoint>?,
         val log: List<ExerciseLogPoint>?,
         val swimming: SwimmingInfo?
     )
@@ -1048,24 +973,6 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class BodyTemperatureValue(val temperature: Double)
 
-    @Serializable
-    private data class SkinTemperatureSeriesEntry(
-        val temperature: Double,
-        val min: Double?,
-        val max: Double?,
-        val startMs: Long,
-        val endMs: Long
-    )
-
-    @Serializable
-    private data class SkinTemperatureValue(
-        val temperature: Double?,
-        val min: Double?,
-        val max: Double?,
-        val series: List<SkinTemperatureSeriesEntry>?
-    )
-
-
     companion object {
         const val DATA_TYPE_METRIC = "metric"
         const val DATA_TYPE_SLEEP = "sleep"
@@ -1079,7 +986,6 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_WATER_INTAKE = "water_intake"
         const val DATA_TYPE_FLOORS_CLIMBED = "floors_climbed"
         const val DATA_TYPE_BODY_TEMPERATURE = "body_temperature"
-        const val DATA_TYPE_SKIN_TEMPERATURE = "skin_temperature"
         const val SOURCE = "samsung_health"
 
         private const val TAG = "FlutterHealth"
@@ -1090,7 +996,6 @@ class SamsungHealthClient(private val context: Context) {
             Permission.of(DataTypes.STEPS, AccessType.READ),
             Permission.of(DataTypes.EXERCISE, AccessType.READ),
             Permission.of(DataTypes.SLEEP, AccessType.READ),
-            Permission.of(DataTypes.BLOOD_OXYGEN, AccessType.READ),
             Permission.of(DataTypes.ACTIVITY_SUMMARY, AccessType.READ),
             Permission.of(DataTypes.BODY_COMPOSITION, AccessType.READ),
             Permission.of(DataTypes.BLOOD_GLUCOSE, AccessType.READ),
@@ -1099,8 +1004,6 @@ class SamsungHealthClient(private val context: Context) {
             Permission.of(DataTypes.WATER_INTAKE, AccessType.READ),
             Permission.of(DataTypes.FLOORS_CLIMBED, AccessType.READ),
             Permission.of(DataTypes.BODY_TEMPERATURE, AccessType.READ),
-            Permission.of(DataTypes.SKIN_TEMPERATURE, AccessType.READ),
-            Permission.of(DataTypes.EXERCISE_LOCATION, AccessType.READ),
         )
     }
 }

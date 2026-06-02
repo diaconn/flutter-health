@@ -78,7 +78,7 @@ class MockFlutterHealthPlatform
       Future.value([]);
 
   @override
-  Future<List<HealthRecord>> querySkinTemperature(DateTime since, DateTime to) =>
+  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
       Future.value([]);
 
   @override

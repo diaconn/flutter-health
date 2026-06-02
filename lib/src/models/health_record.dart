@@ -12,7 +12,7 @@ import 'nutrition_value.dart';
 import 'water_intake_value.dart';
 import 'floors_climbed_value.dart';
 import 'body_temperature_value.dart';
-import 'skin_temperature_value.dart';
+import 'step_segment_value.dart';
 
 class HealthRecord {
   static const String typeMetric = 'metric';
@@ -27,7 +27,7 @@ class HealthRecord {
   static const String typeWaterIntake = 'water_intake';
   static const String typeFloorsClimbed = 'floors_climbed';
   static const String typeBodyTemperature = 'body_temperature';
-  static const String typeSkinTemperature = 'skin_temperature';
+  static const String typeStepSegment = 'step_segment';
 
   final String dataType;
   final int timestamp;
@@ -79,8 +79,8 @@ class HealthRecord {
       dataType == typeFloorsClimbed ? FloorsClimbedValue.fromJson(_decoded()) : null;
   BodyTemperatureValue? get asBodyTemperature =>
       dataType == typeBodyTemperature ? BodyTemperatureValue.fromJson(_decoded()) : null;
-  SkinTemperatureValue? get asSkinTemperature =>
-      dataType == typeSkinTemperature ? SkinTemperatureValue.fromJson(_decoded()) : null;
+  StepSegmentValue? get asStepSegment =>
+      dataType == typeStepSegment ? StepSegmentValue.fromJson(_decoded()) : null;
 
   @override
   String toString() => 'HealthRecord(dataType: $dataType, timestamp: $timestamp, source: $source)';
