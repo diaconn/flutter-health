@@ -99,10 +99,8 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     final since = to.subtract(const Duration(days: 1));
     try {
       final records = await _plugin.queryEndedExerciseSessions(since, to);
-      _log('queryEndedExerciseSessions → ${records.length} session(s)');
-      for (final r in _recent(records, 5)) {
-        _log('  exercise ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}\n${_prettyRecord(r)}');
-      }
+      _logRecords('queryEndedExerciseSessions → ${records.length} session(s)', records,
+          (r) => '  exercise ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}\n${_prettyRecord(r)}');
     } catch (e) {
       _log('queryEndedExerciseSessions error: $e');
     }
@@ -135,10 +133,8 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     final since = to.subtract(const Duration(days: 30));
     try {
       final records = await _plugin.queryWeights(since, to);
-      _log('queryWeights → ${records.length} record(s)');
-      for (final r in _recent(records, 5)) {
-        _log('  weight ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
-      }
+      _logRecords('queryWeights → ${records.length} record(s)', records,
+          (r) => '  weight ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
     } catch (e) {
       _log('queryWeights error: $e');
     }
@@ -160,10 +156,8 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         'step_segment'     => await _plugin.queryStepSegments(since, to),    // iOS 전용
         _ => <HealthRecord>[],
       };
-      _log('$name → ${records.length} record(s)');
-      for (final r in _recent(records, 5)) {
-        _log('  $name ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
-      }
+      _logRecords('$name → ${records.length} record(s)', records,
+          (r) => '  $name ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
     } catch (e) {
       _log('$name error: $e');
     }
@@ -246,6 +240,16 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
 
   /// 표시용 — 플러그인이 최신순(timestamp 내림차순)을 보장하므로 앞에서 [n]개만 취한다.
   List<HealthRecord> _recent(List<HealthRecord> rs, int n) => rs.take(n).toList();
+
+  /// 한 쿼리의 레코드를 한 로그 블록으로 출력한다. _log() 가 0번에 prepend 하므로 레코드를
+  /// 개별 _log 하면 화면에서 배치가 뒤집혀(오래된 것이 위로) 보인다 — 묶어서 최신순(위→아래) 유지.
+  void _logRecords(String header, List<HealthRecord> records, String Function(HealthRecord) line) {
+    final buf = StringBuffer(header);
+    for (final r in _recent(records, 5)) {
+      buf.write('\n${line(r)}');
+    }
+    _log(buf.toString());
+  }
 
   /// envelope(공통 7필드) 전체 + 파싱된 value(=valueJson)를 함께 보여준다.
   String _prettyRecord(HealthRecord r) {
@@ -410,7 +414,7 @@ class _ButtonGrid extends StatelessWidget {
             OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')),
             OutlinedButton(onPressed: onQueryDaily,  child: const Text('Daily Summary')),
             OutlinedButton(onPressed: () => onQueryByName('floors_climbed'), child: const Text('층수')),
-            OutlinedButton(onPressed: () => onQueryByName('step_segment'),   child: const Text('걸음 구간 (iOS)')),
+            OutlinedButton(onPressed: () => onQueryByName('step_segment'),   child: const Text('걸음 구간')),
           ]),
           _section('신체·체성분', [
             OutlinedButton(onPressed: onQueryWeight, child: const Text('체중')),
