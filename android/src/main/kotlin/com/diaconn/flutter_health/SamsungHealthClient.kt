@@ -249,7 +249,6 @@ class SamsungHealthClient(private val context: Context) {
 
         val mainSleep = sleepSessions.maxByOrNull { it.endTimestamp - it.timestamp }
         val sleepDurationMin = mainSleep?.let { (it.endTimestamp - it.timestamp) / 60000 }?.toInt()
-        val sleepValue = mainSleep?.let { runCatching { json.decodeFromString<SleepValue>(it.valueJson) }.getOrNull() }
 
         val exerciseCount = exerciseSessions.size.takeIf { it > 0 }
         val exerciseTotalMin = exerciseSessions.sumOf { (it.endTimestamp - it.timestamp) / 60000 }.toInt().takeIf { it > 0 }
@@ -278,10 +277,6 @@ class SamsungHealthClient(private val context: Context) {
                 activeTimeTotalMin = activeTimeTotalMin,
                 distanceTotalM = distanceTotalM,
                 sleepDurationMin = sleepDurationMin,
-                sleepDeepMin = sleepValue?.deepMin,
-                sleepRemMin = sleepValue?.remMin,
-                sleepLightMin = sleepValue?.lightMin,
-                sleepAwakeMin = sleepValue?.awakeMin,
                 exerciseCount = exerciseCount,
                 exerciseTotalMin = exerciseTotalMin,
                 exerciseTotalCalories = exerciseTotalCalories
@@ -906,10 +901,6 @@ class SamsungHealthClient(private val context: Context) {
         val activeTimeTotalMin: Int?,
         val distanceTotalM: Double?,
         val sleepDurationMin: Int?,
-        val sleepDeepMin: Int?,
-        val sleepRemMin: Int?,
-        val sleepLightMin: Int?,
-        val sleepAwakeMin: Int?,
         val exerciseCount: Int?,
         val exerciseTotalMin: Int?,
         val exerciseTotalCalories: Double?

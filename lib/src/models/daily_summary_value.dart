@@ -9,14 +9,6 @@ class DailySummaryValue {
   final int? activeTimeTotalMin;
   final double? distanceTotalM;
   final int? sleepDurationMin;
-  final int? sleepDeepMin;
-  final int? sleepRemMin;
-
-  /// 얕은/코어 수면 분. iOS 는 Apple Core 단계를 light 로 매핑해 포함.
-  final int? sleepLightMin;
-
-  /// 수면 중 깬 시간 합(분).
-  final int? sleepAwakeMin;
   final int? exerciseCount;
   final int? exerciseTotalMin;
   final double? exerciseTotalCalories;
@@ -32,10 +24,6 @@ class DailySummaryValue {
     this.activeTimeTotalMin,
     this.distanceTotalM,
     this.sleepDurationMin,
-    this.sleepDeepMin,
-    this.sleepRemMin,
-    this.sleepLightMin,
-    this.sleepAwakeMin,
     this.exerciseCount,
     this.exerciseTotalMin,
     this.exerciseTotalCalories,
@@ -52,10 +40,6 @@ class DailySummaryValue {
         activeTimeTotalMin: json['activeTimeTotalMin'] as int?,
         distanceTotalM: (json['distanceTotalM'] as num?)?.toDouble(),
         sleepDurationMin: json['sleepDurationMin'] as int?,
-        sleepDeepMin: json['sleepDeepMin'] as int?,
-        sleepRemMin: json['sleepRemMin'] as int?,
-        sleepLightMin: json['sleepLightMin'] as int?,
-        sleepAwakeMin: json['sleepAwakeMin'] as int?,
         exerciseCount: json['exerciseCount'] as int?,
         exerciseTotalMin: json['exerciseTotalMin'] as int?,
         exerciseTotalCalories: (json['exerciseTotalCalories'] as num?)?.toDouble(),
@@ -72,10 +56,6 @@ class DailySummaryValue {
         if (activeTimeTotalMin != null) 'activeTimeTotalMin': activeTimeTotalMin,
         if (distanceTotalM != null) 'distanceTotalM': distanceTotalM,
         if (sleepDurationMin != null) 'sleepDurationMin': sleepDurationMin,
-        if (sleepDeepMin != null) 'sleepDeepMin': sleepDeepMin,
-        if (sleepRemMin != null) 'sleepRemMin': sleepRemMin,
-        if (sleepLightMin != null) 'sleepLightMin': sleepLightMin,
-        if (sleepAwakeMin != null) 'sleepAwakeMin': sleepAwakeMin,
         if (exerciseCount != null) 'exerciseCount': exerciseCount,
         if (exerciseTotalMin != null) 'exerciseTotalMin': exerciseTotalMin,
         if (exerciseTotalCalories != null) 'exerciseTotalCalories': exerciseTotalCalories,

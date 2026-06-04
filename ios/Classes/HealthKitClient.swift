@@ -453,7 +453,6 @@ final class HealthKitClient: @unchecked Sendable {
         let sleepSessions = await queryEndedSleepSessions(since: dayStart, to: dayEnd)
         let mainSleep = sleepSessions.max { ($0.endTimestamp - $0.timestamp) < ($1.endTimestamp - $1.timestamp) }
         let sleepDurationMin = mainSleep.map { Int(($0.endTimestamp - $0.timestamp) / 60000) }
-        let sleepValue = mainSleep.flatMap { try? jsonDecoder.decode(SleepValue.self, from: Data($0.valueJson.utf8)) }
 
         let exerciseSessions = await queryEndedExerciseSessions(since: dayStart, to: dayEnd)
         let exerciseCount = exerciseSessions.isEmpty ? nil : exerciseSessions.count
@@ -480,10 +479,6 @@ final class HealthKitClient: @unchecked Sendable {
             activeTimeTotalMin: exTimeMin.map { Int($0) },
             distanceTotalM: dist,
             sleepDurationMin: sleepDurationMin,
-            sleepDeepMin: sleepValue?.deepMin,
-            sleepRemMin: sleepValue?.remMin,
-            sleepLightMin: sleepValue?.lightMin,
-            sleepAwakeMin: sleepValue?.awakeMin,
             exerciseCount: exerciseCount,
             exerciseTotalMin: exerciseTotalMin,
             exerciseTotalCalories: exerciseTotalCalories
@@ -1350,10 +1345,6 @@ final class HealthKitClient: @unchecked Sendable {
         let activeTimeTotalMin: Int?           // appleExerciseTime 분 합
         let distanceTotalM: Double?
         let sleepDurationMin: Int?
-        let sleepDeepMin: Int?
-        let sleepRemMin: Int?
-        let sleepLightMin: Int?                // Apple Core 단계 포함 (Core→light 매핑)
-        let sleepAwakeMin: Int?                // 수면 중 깬 시간 합
         let exerciseCount: Int?
         let exerciseTotalMin: Int?
         let exerciseTotalCalories: Double?
