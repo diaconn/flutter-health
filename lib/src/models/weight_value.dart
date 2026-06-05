@@ -1,6 +1,5 @@
 class WeightValue {
   final double weight;
-  final double? height;
   final double? bmi;
   final double? bodyFat;
   final double? bodyFatMass;
@@ -14,7 +13,6 @@ class WeightValue {
 
   const WeightValue({
     required this.weight,
-    this.height,
     this.bmi,
     this.bodyFat,
     this.bodyFatMass,
@@ -29,7 +27,6 @@ class WeightValue {
 
   factory WeightValue.fromJson(Map<String, dynamic> json) => WeightValue(
         weight: (json['weight'] as num).toDouble(),
-        height: (json['height'] as num?)?.toDouble(),
         bmi: (json['bmi'] as num?)?.toDouble(),
         bodyFat: (json['bodyFat'] as num?)?.toDouble(),
         bodyFatMass: (json['bodyFatMass'] as num?)?.toDouble(),
@@ -44,7 +41,6 @@ class WeightValue {
 
   Map<String, dynamic> toJson() => {
         'weight': weight,
-        if (height != null) 'height': height,
         if (bmi != null) 'bmi': bmi,
         if (bodyFat != null) 'bodyFat': bodyFat,
         if (bodyFatMass != null) 'bodyFatMass': bodyFatMass,

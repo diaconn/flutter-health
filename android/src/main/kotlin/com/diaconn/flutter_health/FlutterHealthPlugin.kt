@@ -160,8 +160,8 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             "queryBloodPressure",
             "queryNutrition",
             "queryWaterIntake",
-            "queryFloorsClimbed",
-            "queryBodyTemperature" -> {
+            "queryStepSegments",
+            "queryHeight" -> {
                 val since = call.argument<Number>("since")?.toLong()
                 val to = call.argument<Number>("to")?.toLong()
                 if (since == null || to == null) {
@@ -175,8 +175,8 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                             "queryBloodPressure" -> client.queryBloodPressure(since, to)
                             "queryNutrition" -> client.queryNutrition(since, to)
                             "queryWaterIntake" -> client.queryWaterIntake(since, to)
-                            "queryFloorsClimbed" -> client.queryFloorsClimbed(since, to)
-                            "queryBodyTemperature" -> client.queryBodyTemperature(since, to)
+                            "queryStepSegments" -> client.queryStepSegments(since, to)
+                            "queryHeight" -> client.queryHeight(since, to)
                             else -> emptyList()
                         }
                         list.map { it.toMap() }

@@ -17,19 +17,13 @@ class BloodGlucoseSeriesEntry {
 
 class BloodGlucoseValue {
   final double glucose; // mg/dL
-  final String? measurementType; // "whole_blood"|"plasma"|"serum"
-  final String? sampleSourceType; // "venous"|"capillary"
-  final int? mealTimeMs;
-  final String? mealStatus; // "fasting"|"before_meal"|"after_meal"|"before_breakfast"|...
+  final String? mealStatus; // "fasting"|"before_meal"|"after_meal"|"general" (Samsung 앱 입력 4종) 등
   final double? insulinInjected;
   final bool? medicationTaken;
   final List<BloodGlucoseSeriesEntry>? series;
 
   const BloodGlucoseValue({
     required this.glucose,
-    this.measurementType,
-    this.sampleSourceType,
-    this.mealTimeMs,
     this.mealStatus,
     this.insulinInjected,
     this.medicationTaken,
@@ -38,9 +32,6 @@ class BloodGlucoseValue {
 
   factory BloodGlucoseValue.fromJson(Map<String, dynamic> json) => BloodGlucoseValue(
         glucose: (json['glucose'] as num).toDouble(),
-        measurementType: json['measurementType'] as String?,
-        sampleSourceType: json['sampleSourceType'] as String?,
-        mealTimeMs: (json['mealTimeMs'] as num?)?.toInt(),
         mealStatus: json['mealStatus'] as String?,
         insulinInjected: (json['insulinInjected'] as num?)?.toDouble(),
         medicationTaken: json['medicationTaken'] as bool?,
@@ -51,9 +42,6 @@ class BloodGlucoseValue {
 
   Map<String, dynamic> toJson() => {
         'glucose': glucose,
-        if (measurementType != null) 'measurementType': measurementType,
-        if (sampleSourceType != null) 'sampleSourceType': sampleSourceType,
-        if (mealTimeMs != null) 'mealTimeMs': mealTimeMs,
         if (mealStatus != null) 'mealStatus': mealStatus,
         if (insulinInjected != null) 'insulinInjected': insulinInjected,
         if (medicationTaken != null) 'medicationTaken': medicationTaken,

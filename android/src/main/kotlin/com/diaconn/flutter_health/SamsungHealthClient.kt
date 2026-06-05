@@ -19,6 +19,8 @@ import com.samsung.android.sdk.health.data.request.DataTypes
 import com.samsung.android.sdk.health.data.request.InstantTimeFilter
 import com.samsung.android.sdk.health.data.request.LocalDateFilter
 import com.samsung.android.sdk.health.data.request.LocalTimeFilter
+import com.samsung.android.sdk.health.data.request.LocalTimeGroup
+import com.samsung.android.sdk.health.data.request.LocalTimeGroupUnit
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
@@ -146,6 +148,7 @@ class SamsungHealthClient(private val context: Context) {
             s.readData(request).dataList
                 .mapNotNull { buildSleepRecord(it) }
                 .filter { it.endTimestamp in since..to }
+                .sortedByDescending { it.timestamp }
         }.onFailure { Log.e(TAG, "수면 세션 조회 실패", it) }.getOrDefault(emptyList())
     }
 
@@ -160,6 +163,7 @@ class SamsungHealthClient(private val context: Context) {
             s.readData(request).dataList
                 .mapNotNull { buildExerciseRecord(it) }
                 .filter { it.endTimestamp in since..to }
+                .sortedByDescending { it.timestamp }
         }.onFailure { Log.e(TAG, "운동 세션 조회 실패", it) }.getOrDefault(emptyList())
     }
 
@@ -298,7 +302,7 @@ class SamsungHealthClient(private val context: Context) {
             val tz = currentTzOffset()
             val now = System.currentTimeMillis()
             s.readData(request).dataList
-                .sortedBy { it.startTime?.toEpochMilli() ?: 0L }
+                .sortedByDescending { it.startTime?.toEpochMilli() ?: 0L }
                 .mapNotNull { point ->
                     val weight = point.getValueOrDefault(DataType.BodyCompositionType.WEIGHT, 0f)
                     if (weight <= 0f) return@mapNotNull null
@@ -306,7 +310,6 @@ class SamsungHealthClient(private val context: Context) {
                     fun bcf(field: com.samsung.android.sdk.health.data.data.Field<Float>): Double? =
                         point.getValueOrDefault(field, 0f).let { if (it > 0f) it.toDouble() else null }
 
-                    val height = bcf(DataType.BodyCompositionType.HEIGHT)
                     val bmi = bcf(DataType.BodyCompositionType.BODY_MASS_INDEX)
                     val bodyFat = bcf(DataType.BodyCompositionType.BODY_FAT)
                     val bodyFatMass = bcf(DataType.BodyCompositionType.BODY_FAT_MASS)
@@ -331,7 +334,6 @@ class SamsungHealthClient(private val context: Context) {
                         source = SOURCE,
                         valueJson = json.encodeToString(WeightValue(
                             weight = weight.toDouble(),
-                            height = height,
                             bmi = bmi,
                             bodyFat = bodyFat,
                             bodyFatMass = bodyFatMass,
@@ -355,12 +357,6 @@ class SamsungHealthClient(private val context: Context) {
             val glucose = runCatching { point.getValue(DataType.BloodGlucoseType.GLUCOSE_LEVEL) }.getOrNull()
                 ?: point.getValueOrDefault(DataType.BloodGlucoseType.GLUCOSE_LEVEL, 0f)
             if (glucose <= 0f) return@readPoints null
-            val measurementType = runCatching { point.getValue(DataType.BloodGlucoseType.MEASUREMENT_TYPE) }
-                .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase()
-            val sampleSourceType = runCatching { point.getValue(DataType.BloodGlucoseType.SAMPLE_SOURCE_TYPE) }
-                .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase()
-            val mealTime = runCatching { point.getValue(DataType.BloodGlucoseType.MEAL_TIME) }
-                .getOrNull()?.toEpochMilli()?.takeIf { it > 0L }
             val mealStatus = runCatching { point.getValue(DataType.BloodGlucoseType.MEAL_STATUS) }
                 .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase()
             val insulin = runCatching { point.getValue(DataType.BloodGlucoseType.INSULIN_INJECTED) }
@@ -370,7 +366,7 @@ class SamsungHealthClient(private val context: Context) {
             val series = runCatching { point.getValue(DataType.BloodGlucoseType.SERIES_DATA) }
                 .getOrNull()?.takeIf { it.isNotEmpty() }?.map {
                     BloodGlucoseSeriesEntry(
-                        glucose = it.glucose.toDouble(),
+                        glucose = it.glucose.toDouble() * MMOL_L_TO_MG_DL,
                         timestampMs = it.timestamp.toEpochMilli()
                     )
                 }
@@ -382,10 +378,7 @@ class SamsungHealthClient(private val context: Context) {
                 tzOffset = tz,
                 source = SOURCE,
                 valueJson = json.encodeToString(BloodGlucoseValue(
-                    glucose = glucose.toDouble(),
-                    measurementType = measurementType,
-                    sampleSourceType = sampleSourceType,
-                    mealTimeMs = mealTime,
+                    glucose = glucose.toDouble() * MMOL_L_TO_MG_DL, // Samsung SDK raw=mmol/L → mg/dL (iOS·스키마 통일)
                     mealStatus = mealStatus,
                     insulinInjected = insulin,
                     medicationTaken = medication,
@@ -475,53 +468,120 @@ class SamsungHealthClient(private val context: Context) {
             )
         }
 
-    /** [since]~[to] 구간 내 모든 수분 섭취 기록. */
-    suspend fun queryWaterIntake(since: Long, to: Long): List<HealthRecord> =
-        readPoints(since, to, DataTypes.WATER_INTAKE, "수분 섭취") { point, startMs, endMs, tz, now ->
-            val amount = runCatching { point.getValue(DataType.WaterIntakeType.AMOUNT) }.getOrNull()
-            if (amount == null || amount <= 0f) return@readPoints null
-            HealthRecord(
-                dataType = DATA_TYPE_WATER_INTAKE,
-                timestamp = startMs,
-                endTimestamp = endMs,
-                tzOffset = tz,
-                source = SOURCE,
-                valueJson = json.encodeToString(WaterIntakeValue(amount = amount.toDouble())),
-                createdAt = now,
-            )
-        }
+    /**
+     * [since]~[to] 구간 내 모든 수분 섭취 기록. 각 기록에 그 레코드가 속한 로컬 달력일 안에서
+     * 자정부터 그 시각까지 쌓인 누적량(cumulativeToDate)을 함께 담는다(같은 날끼리 시각 오름차순 prefix-sum).
+     * 최신 레코드의 cumulativeToDate = 그날 전체 합계. 반환은 표시 일관성 위해 최신순(내림차순).
+     */
+    suspend fun queryWaterIntake(since: Long, to: Long): List<HealthRecord> {
+        val s = store ?: return emptyList()
+        return runCatching {
+            val filter = InstantTimeFilter.of(Instant.ofEpochMilli(since), Instant.ofEpochMilli(to))
+            val request = DataTypes.WATER_INTAKE.readDataRequestBuilder.setInstantTimeFilter(filter).build()
+            val tz = currentTzOffset()
+            val now = System.currentTimeMillis()
 
-    /** [since]~[to] 구간 내 모든 계단 기록. */
-    suspend fun queryFloorsClimbed(since: Long, to: Long): List<HealthRecord> =
-        readPoints(since, to, DataTypes.FLOORS_CLIMBED, "계단") { point, startMs, endMs, tz, now ->
-            val floor = runCatching { point.getValue(DataType.FloorsClimbedType.FLOOR) }.getOrNull()
-            if (floor == null || floor <= 0f) return@readPoints null
-            HealthRecord(
-                dataType = DATA_TYPE_FLOORS_CLIMBED,
-                timestamp = startMs,
-                endTimestamp = endMs,
-                tzOffset = tz,
-                source = SOURCE,
-                valueJson = json.encodeToString(FloorsClimbedValue(floor = floor.toDouble())),
-                createdAt = now,
-            )
-        }
+            data class WaterRaw(val startMs: Long, val endMs: Long, val amount: Double)
+            val raws = s.readData(request).dataList.mapNotNull { point ->
+                val amount = runCatching { point.getValue(DataType.WaterIntakeType.AMOUNT) }.getOrNull()
+                if (amount == null || amount <= 0f) return@mapNotNull null
+                val startMs = point.startTime?.toEpochMilli() ?: return@mapNotNull null
+                WaterRaw(startMs, point.endTime?.toEpochMilli() ?: startMs, amount.toDouble())
+            }
 
-    /** [since]~[to] 구간 내 모든 체온 측정 목록. */
-    suspend fun queryBodyTemperature(since: Long, to: Long): List<HealthRecord> =
-        readPoints(since, to, DataTypes.BODY_TEMPERATURE, "체온") { point, startMs, endMs, tz, now ->
-            val temp = runCatching { point.getValue(DataType.BodyTemperatureType.BODY_TEMPERATURE) }.getOrNull()
-            if (temp == null || temp <= 0f) return@readPoints null
-            HealthRecord(
-                dataType = DATA_TYPE_BODY_TEMPERATURE,
-                timestamp = startMs,
-                endTimestamp = endMs,
-                tzOffset = tz,
-                source = SOURCE,
-                valueJson = json.encodeToString(BodyTemperatureValue(temperature = temp.toDouble())),
-                createdAt = now,
-            )
-        }
+            // 로컬 달력일별로 묶어 시각 오름차순 prefix-sum → cumulativeToDate. 표시용으로 다시 최신순 정렬.
+            raws.groupBy { Instant.ofEpochMilli(it.startMs).atZone(ZoneId.systemDefault()).toLocalDate() }
+                .flatMap { (_, dayRaws) ->
+                    var running = 0.0
+                    dayRaws.sortedBy { it.startMs }.map { r ->
+                        running += r.amount
+                        HealthRecord(
+                            dataType = DATA_TYPE_WATER_INTAKE,
+                            timestamp = r.startMs,
+                            endTimestamp = r.endMs,
+                            tzOffset = tz,
+                            source = SOURCE,
+                            valueJson = json.encodeToString(WaterIntakeValue(
+                                amount = r.amount,
+                                cumulativeToDate = running,
+                            )),
+                            createdAt = now,
+                        )
+                    }
+                }
+                .sortedByDescending { it.timestamp }
+        }.onFailure { Log.e(TAG, "수분 섭취 조회 실패", it) }.getOrDefault(emptyList())
+    }
+
+    /**
+     * [since]~[to] 구간의 걸음 구간(step_segment) 목록. envelope timestamp/endTimestamp 가 각 구간의 시작/종료.
+     * iOS 는 개별 stepCount 샘플(가변 시작/종료)을 그대로 반환하지만, Samsung SDK 는 STEPS 가 비-Readable(집계 전용)
+     * 이라 개별 샘플을 못 준다. 대신 10분 단위 그룹 집계로 구간화 — Samsung 내부 걸음 저장 bin 이 10분이라,
+     * 그보다 잦은(1분) 그룹을 요청하면 SDK 가 bin 값을 균등 분배해 모든 구간이 같은 값으로 찍힌다(예: 30보/10분→1분마다 3).
+     * 10분이 보간 없는 최소 실측 입자. 걸음수 0 인 구간은 omit.
+     * sourceType 은 집계가 기기별로 안 쪼개져 판별 불가 → "other" 고정(phone/watch/tablet 구분은 iOS 한정).
+     * 그룹 집계는 페이지네이션되므로 pageToken 으로 전량 수집(누락 방지).
+     */
+    suspend fun queryStepSegments(since: Long, to: Long): List<HealthRecord> {
+        val s = store ?: return emptyList()
+        return runCatching {
+            val filter = LocalTimeFilter.of(since.toLocalDateTime(), to.toLocalDateTime())
+            val group = LocalTimeGroup.of(LocalTimeGroupUnit.MINUTELY, 10) // Samsung 내부 step bin = 10분; 더 잦으면 균등분배 보간
+            val tz = currentTzOffset()
+            val now = System.currentTimeMillis()
+            val records = mutableListOf<HealthRecord>()
+            var pageToken: String? = null
+            do {
+                val builder = DataType.StepsType.TOTAL.requestBuilder
+                    .setLocalTimeFilterWithGroup(filter, group)
+                pageToken?.let { builder.setPageToken(it) }
+                val response = s.aggregateData(builder.build())
+                response.dataList.forEach { agg ->
+                    val count = agg.value?.toInt()?.takeIf { it > 0 } ?: return@forEach
+                    val startMs = agg.startTime?.toEpochMilli() ?: return@forEach
+                    val endMs = agg.endTime?.toEpochMilli() ?: startMs
+                    records += HealthRecord(
+                        dataType = DATA_TYPE_STEP_SEGMENT,
+                        timestamp = startMs,
+                        endTimestamp = endMs,
+                        tzOffset = tz,
+                        source = SOURCE,
+                        valueJson = json.encodeToString(StepSegmentValue(count = count, sourceType = "other")),
+                        createdAt = now,
+                    )
+                }
+                pageToken = response.pageToken?.takeIf { it.isNotEmpty() }
+            } while (pageToken != null)
+            records.sortedByDescending { it.timestamp }
+        }.onFailure { Log.e(TAG, "걸음 구간 조회 실패", it) }.getOrDefault(emptyList())
+    }
+
+    /**
+     * 사용자 프로필에 설정된 현재 키(신장) 1건. [since]/[to] 는 프로필 값이라 무시(시간 범위 없음).
+     * UserProfile.HEIGHT 는 Samsung 앱 프로필 설정값 — 체성분 측정의 HEIGHT(직접 입력 경로 없어 제거됨)와 별개.
+     */
+    suspend fun queryHeight(since: Long, to: Long): List<HealthRecord> {
+        val s = store ?: return emptyList()
+        return runCatching {
+            val request = DataTypes.USER_PROFILE.readDataRequestBuilder.build()
+            val tz = currentTzOffset()
+            val now = System.currentTimeMillis()
+            s.readData(request).dataList.mapNotNull { point ->
+                val height = point.getValueOrDefault(DataType.UserProfileDataType.HEIGHT, 0f)
+                if (height <= 0f) return@mapNotNull null
+                HealthRecord(
+                    dataType = DATA_TYPE_HEIGHT,
+                    timestamp = now,            // 프로필 값은 측정 시각이 없어 조회 시각 사용
+                    endTimestamp = now,
+                    tzOffset = tz,
+                    source = SOURCE,
+                    // Samsung UserProfile.HEIGHT 는 cm (실기기 검증 2026-06-04, iOS·스키마와 통일).
+                    valueJson = json.encodeToString(HeightValue(value = height.toDouble())),
+                    createdAt = now,
+                )
+            }
+        }.onFailure { Log.e(TAG, "키(프로필) 조회 실패", it) }.getOrDefault(emptyList())
+    }
 
     // --- Private ---
 
@@ -609,7 +669,7 @@ class SamsungHealthClient(private val context: Context) {
             val tz = currentTzOffset()
             val now = System.currentTimeMillis()
             s.readData(request).dataList
-                .sortedBy { it.startTime?.toEpochMilli() ?: 0L }
+                .sortedByDescending { it.startTime?.toEpochMilli() ?: 0L }
                 .mapNotNull { point ->
                     val startMs = point.startTime?.toEpochMilli() ?: since
                     val endMs = point.endTime?.toEpochMilli() ?: startMs
@@ -876,7 +936,6 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class WeightValue(
         val weight: Double,
-        val height: Double?,
         val bmi: Double?,
         val bodyFat: Double?,
         val bodyFatMass: Double?,
@@ -912,9 +971,6 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class BloodGlucoseValue(
         val glucose: Double,
-        val measurementType: String?,
-        val sampleSourceType: String?,
-        val mealTimeMs: Long?,
         val mealStatus: String?,
         val insulinInjected: Double?,
         val medicationTaken: Boolean?,
@@ -954,15 +1010,15 @@ class SamsungHealthClient(private val context: Context) {
     )
 
     @Serializable
-    private data class WaterIntakeValue(val amount: Double)
+    private data class WaterIntakeValue(val amount: Double, val cumulativeToDate: Double? = null)
 
 
     @Serializable
-    private data class FloorsClimbedValue(val floor: Double)
+    private data class StepSegmentValue(val count: Int, val sourceType: String)
 
 
     @Serializable
-    private data class BodyTemperatureValue(val temperature: Double)
+    private data class HeightValue(val value: Double)
 
     companion object {
         const val DATA_TYPE_METRIC = "metric"
@@ -975,9 +1031,13 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_BLOOD_PRESSURE = "blood_pressure"
         const val DATA_TYPE_NUTRITION = "nutrition"
         const val DATA_TYPE_WATER_INTAKE = "water_intake"
-        const val DATA_TYPE_FLOORS_CLIMBED = "floors_climbed"
-        const val DATA_TYPE_BODY_TEMPERATURE = "body_temperature"
+        const val DATA_TYPE_STEP_SEGMENT = "step_segment"
+        const val DATA_TYPE_HEIGHT = "height"
         const val SOURCE = "samsung_health"
+
+        // 혈당 단위 변환: Samsung SDK GLUCOSE_LEVEL raw = mmol/L → mg/dL (iOS HealthKit·스키마와 통일).
+        // 1 mmol/L = 18.0182 mg/dL. 실기기 기준치 대조 검증 완료(2026-06-04).
+        private const val MMOL_L_TO_MG_DL = 18.0182
 
         private const val TAG = "FlutterHealth"
         private const val SAMSUNG_HEALTH_PACKAGE = "com.sec.android.app.shealth"
@@ -993,8 +1053,7 @@ class SamsungHealthClient(private val context: Context) {
             Permission.of(DataTypes.BLOOD_PRESSURE, AccessType.READ),
             Permission.of(DataTypes.NUTRITION, AccessType.READ),
             Permission.of(DataTypes.WATER_INTAKE, AccessType.READ),
-            Permission.of(DataTypes.FLOORS_CLIMBED, AccessType.READ),
-            Permission.of(DataTypes.BODY_TEMPERATURE, AccessType.READ),
+            Permission.of(DataTypes.USER_PROFILE, AccessType.READ),
         )
     }
 }

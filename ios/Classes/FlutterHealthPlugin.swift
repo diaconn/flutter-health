@@ -160,7 +160,7 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
             }
 
         case "queryBloodGlucose", "queryBloodPressure", "queryInsulinDelivery", "queryNutrition", "queryWaterIntake",
-             "queryFloorsClimbed", "queryBodyTemperature", "queryStepSegments",
+             "queryStepSegments", "queryHeight",
              "queryMedication":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
@@ -179,9 +179,8 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 case "queryInsulinDelivery":      records = await client.queryInsulinDelivery(since: since, to: to)
                 case "queryNutrition":            records = await client.queryNutrition(since: since, to: to)
                 case "queryWaterIntake":          records = await client.queryWaterIntake(since: since, to: to)
-                case "queryFloorsClimbed":        records = await client.queryFloorsClimbed(since: since, to: to)
-                case "queryBodyTemperature":      records = await client.queryBodyTemperature(since: since, to: to)
                 case "queryStepSegments":         records = await client.queryStepSegments(since: since, to: to)
+                case "queryHeight":               records = await client.queryHeight(since: since, to: to)
                 case "queryMedication":
                     if #available(iOS 26.0, *) { records = await client.queryMedication(since: since, to: to) }
                     else { records = [] }

@@ -84,16 +84,12 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
       _queryList('queryWaterIntake', since, to);
 
   @override
-  Future<List<HealthRecord>> queryFloorsClimbed(DateTime since, DateTime to) =>
-      _queryList('queryFloorsClimbed', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryBodyTemperature(DateTime since, DateTime to) =>
-      _queryList('queryBodyTemperature', since, to);
-
-  @override
   Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
       _queryList('queryStepSegments', since, to);
+
+  @override
+  Future<List<HealthRecord>> queryHeight(DateTime since, DateTime to) =>
+      _queryList('queryHeight', since, to);
 
   @override
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>

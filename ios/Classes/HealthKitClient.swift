@@ -107,12 +107,13 @@ final class HealthKitClient: @unchecked Sendable {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
         guard let samples = try? await descriptor.result(for: store) else { return [] }
         let sessions = groupSleepSessions(samples: samples)
         let tz = currentTzOffset()
-        return sessions.compactMap { session in
+        // 최신순(내림차순) 출력 — 그룹핑은 내부에서 시간순으로 처리되므로 여기서 종료 후 정렬.
+        return sessions.sorted { $0.start > $1.start }.compactMap { session in
             let startMs = toMs(session.start)
             let endMs = toMs(session.end)
             let durationMin = Int((endMs - startMs) / 60000)
@@ -141,7 +142,7 @@ final class HealthKitClient: @unchecked Sendable {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.workout(predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
         guard let workouts = try? await descriptor.result(for: store) else { return [] }
         let tz = currentTzOffset()
@@ -499,17 +500,20 @@ final class HealthKitClient: @unchecked Sendable {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
-        guard let samples = try? await descriptor.result(for: store) else { return [] }
+        // .bodyMass 와 .bodyFatPercentage 는 별개 샘플 → 독립 쿼리 2건을 동시 실행(직렬 대기 방지) 후 startDate 로 매칭.
+        async let samplesResult = descriptor.result(for: store)
+        async let bodyFatTask = fetchBodyFatPercentByStart(since: since, to: to)
+        guard let samples = try? await samplesResult else { return [] }
+        let bodyFatByStart = await bodyFatTask
         let tz = currentTzOffset()
         let now = toMs(Date())
         return samples.compactMap { sample in
             let kg = sample.quantity.doubleValue(for: weightUnit)
             guard kg > 0 else { return nil }
-            // HealthKit의 .bodyMass 샘플에는 BMI/체지방률이 포함되지 않음.
-            // 별도 .bodyMassIndex / .bodyFatPercentage 쿼리가 필요해 의도적으로 nil 유지.
-            let value = WeightValue(weight: kg, bmi: nil, bodyFat: nil)
+            // BMI 는 .bodyMass 에 미포함이라 nil 유지. bodyFat 은 위에서 매칭한 %(0~100) 값.
+            let value = WeightValue(weight: kg, bmi: nil, bodyFat: bodyFatByStart[sample.startDate])
             return HealthRecord(
                 dataType: Self.dataTypeWeight,
                 timestamp: toMs(sample.startDate),
@@ -522,13 +526,30 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    /// `.bodyFatPercentage` 샘플을 startDate→%(0~100) 맵으로 반환. HealthKit raw 분율(0~1) ×100.
+    private func fetchBodyFatPercentByStart(since: Date, to: Date) async -> [Date: Double] {
+        guard let qt = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage) else { return [:] }
+        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: qt, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+        guard let samples = try? await descriptor.result(for: store) else { return [:] }
+        var out: [Date: Double] = [:]
+        for s in samples {
+            let pct = s.quantity.doubleValue(for: HKUnit.percent()) * 100   // 분율(0~1) → %
+            if pct > 0 { out[s.startDate] = pct }
+        }
+        return out
+    }
+
     func queryBloodGlucose(since: Date, to: Date) async -> [HealthRecord] {
         guard let qt = HKQuantityType.quantityType(forIdentifier: .bloodGlucose) else { return [] }
         let unit = HKUnit.gramUnit(with: .milli).unitDivided(by: HKUnit.literUnit(with: .deci)) // mg/dL
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
         guard let samples = try? await descriptor.result(for: store) else { return [] }
         let tz = currentTzOffset()
@@ -546,9 +567,6 @@ final class HealthKitClient: @unchecked Sendable {
             }
             let value = BloodGlucoseValue(
                 glucose: glucose,
-                measurementType: nil,
-                sampleSourceType: nil,
-                mealTimeMs: nil,
                 mealStatus: mealStatus,
                 insulinInjected: nil,
                 medicationTaken: nil
@@ -574,7 +592,7 @@ final class HealthKitClient: @unchecked Sendable {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
         guard let samples = try? await descriptor.result(for: store) else { return [] }
         let tz = currentTzOffset()
@@ -692,7 +710,7 @@ final class HealthKitClient: @unchecked Sendable {
         let tz = currentTzOffset()
         let now = toMs(Date())
         let cal = Calendar.current
-        return dayKeys.sorted().map { day in
+        return dayKeys.sorted(by: >).map { day in
             let value = NutritionValue(
                 mealType: nil,
                 title: nil,
@@ -756,21 +774,46 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    /// 각 수분 샘플에 그 샘플이 속한 로컬 달력일 안에서 자정부터 그 시각까지 쌓인 누적량(cumulativeToDate)을 담는다.
+    /// 같은 날끼리 startDate 오름차순 prefix-sum. 최신 샘플의 cumulativeToDate = 그날 전체 합계.
+    /// 반환은 표시 일관성 위해 최신순(내림차순).
     func queryWaterIntake(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.dietaryWater, unit: .literUnit(with: .milli), dataType: Self.dataTypeWaterIntake, since: since, to: to) { v, _ in
-            v > 0 ? WaterIntakeValue(amount: v) : nil
+        guard let qt = HKQuantityType.quantityType(forIdentifier: .dietaryWater) else { return [] }
+        let unit = HKUnit.literUnit(with: .milli)
+        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: qt, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate, order: .forward)]
+        )
+        guard let samples = try? await descriptor.result(for: store) else { return [] }
+        let tz = currentTzOffset()
+        let now = toMs(Date())
+        let cal = Calendar.current
+        var runningByDay: [Date: Double] = [:]
+        var records: [HealthRecord] = []
+        for sample in samples {   // startDate 오름차순
+            let v = sample.quantity.doubleValue(for: unit)
+            guard v > 0 else { continue }
+            let day = cal.startOfDay(for: sample.startDate)
+            let running = (runningByDay[day] ?? 0) + v
+            runningByDay[day] = running
+            records.append(HealthRecord(
+                dataType: Self.dataTypeWaterIntake,
+                timestamp: toMs(sample.startDate),
+                endTimestamp: toMs(sample.endDate),
+                tzOffset: tz,
+                source: Self.source,
+                valueJson: encodeToJson(WaterIntakeValue(amount: v, cumulativeToDate: running)),
+                createdAt: now
+            ))
         }
+        return records.sorted { $0.timestamp > $1.timestamp }
     }
 
-    func queryFloorsClimbed(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.flightsClimbed, unit: .count(), dataType: Self.dataTypeFloorsClimbed, since: since, to: to) { v, _ in
-            v > 0 ? FloorsClimbedValue(floor: v) : nil
-        }
-    }
-
-    func queryBodyTemperature(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.bodyTemperature, unit: .degreeCelsius(), dataType: Self.dataTypeBodyTemperature, since: since, to: to) { v, _ in
-            v > 0 ? BodyTemperatureValue(temperature: v) : nil
+    /// 키(신장) — HealthKit `height` 샘플을 **cm** 로 반환 (dataType="height"). Android(UserProfile)와 단위 통일.
+    func queryHeight(since: Date, to: Date) async -> [HealthRecord] {
+        await queryQuantitySamples(.height, unit: HKUnit.meterUnit(with: .centi), dataType: Self.dataTypeHeight, since: since, to: to) { v, _ in
+            v > 0 ? HeightValue(value: v) : nil
         }
     }
 
@@ -803,7 +846,7 @@ final class HealthKitClient: @unchecked Sendable {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         return await withCheckedContinuation { continuation in
             var resumed = false
-            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]) { [weak self] _, samples, _ in
+            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]) { [weak self] _, samples, _ in
                 guard let self = self else {
                     if !resumed { resumed = true; continuation.resume(returning: []) }
                     return
@@ -893,15 +936,15 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .appleExerciseTime)!,   // daily/hourly 의 activeTime
         HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
         HKObjectType.quantityType(forIdentifier: .bodyMass)!,
+        HKObjectType.quantityType(forIdentifier: .height)!,
+        HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)!,
         HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
         HKObjectType.workoutType(),
-        // 혈당/혈압/수분/계단/체온
+        // 혈당/혈압/수분
         HKObjectType.quantityType(forIdentifier: .bloodGlucose)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)!,
         HKObjectType.quantityType(forIdentifier: .dietaryWater)!,
-        HKObjectType.quantityType(forIdentifier: .flightsClimbed)!,
-        HKObjectType.quantityType(forIdentifier: .bodyTemperature)!,
         // 영양(nutrition) 세부 영양소
         HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)!,
         HKObjectType.quantityType(forIdentifier: .dietaryFatTotal)!,
@@ -1029,7 +1072,7 @@ final class HealthKitClient: @unchecked Sendable {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
         guard let samples = try? await descriptor.result(for: store) else { return [] }
         let tz = currentTzOffset()
@@ -1266,9 +1309,6 @@ final class HealthKitClient: @unchecked Sendable {
 
     fileprivate struct BloodGlucoseValue: Codable {
         let glucose: Double
-        let measurementType: String?
-        let sampleSourceType: String?
-        let mealTimeMs: Int64?
         let mealStatus: String?
         let insulinInjected: Double?
         let medicationTaken: Bool?
@@ -1311,19 +1351,16 @@ final class HealthKitClient: @unchecked Sendable {
 
     fileprivate struct WaterIntakeValue: Codable {
         let amount: Double
-    }
-
-    fileprivate struct FloorsClimbedValue: Codable {
-        let floor: Double
-    }
-
-    fileprivate struct BodyTemperatureValue: Codable {
-        let temperature: Double
+        var cumulativeToDate: Double? = nil   // 당일 자정~이 샘플 시각 누적 (nil 이면 JSONEncoder 가 키 생략)
     }
 
     fileprivate struct StepSegmentValue: Codable {
         let count: Int
         let sourceType: String       // 기록 기기 종류: "phone"|"watch"|"tablet"|"other" (사용자 지정 기기명 대신 정규화)
+    }
+
+    fileprivate struct HeightValue: Codable {
+        let value: Double            // cm
     }
 
     fileprivate struct MedicationValue: Codable {
@@ -1363,9 +1400,8 @@ final class HealthKitClient: @unchecked Sendable {
     static let dataTypeInsulinDelivery = "insulin_delivery"
     static let dataTypeNutrition = "nutrition"
     static let dataTypeWaterIntake = "water_intake"
-    static let dataTypeFloorsClimbed = "floors_climbed"
-    static let dataTypeBodyTemperature = "body_temperature"
     static let dataTypeStepSegment = "step_segment"
+    static let dataTypeHeight = "height"
     static let dataTypeMedication = "medication"
     static let source = "apple_health"
 }

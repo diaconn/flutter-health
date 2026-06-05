@@ -70,15 +70,11 @@ class MockFlutterHealthPlatform
       Future.value([]);
 
   @override
-  Future<List<HealthRecord>> queryFloorsClimbed(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryBodyTemperature(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
   Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryHeight(DateTime since, DateTime to) =>
       Future.value([]);
 
   @override

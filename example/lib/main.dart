@@ -96,7 +96,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
 
   Future<void> _queryExercise() async {
     final to    = DateTime.now();
-    final since = to.subtract(const Duration(days: 1));
+    final since = DateTime(to.year, to.month, to.day); // 오늘 0시(로컬) — 오늘 종료된 운동만
     try {
       final records = await _plugin.queryEndedExerciseSessions(since, to);
       _logRecords('queryEndedExerciseSessions → ${records.length} session(s)', records,
@@ -130,7 +130,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
 
   Future<void> _queryWeight() async {
     final to    = DateTime.now();
-    final since = to.subtract(const Duration(days: 30));
+    final since = to.subtract(const Duration(days: 30)); // 체중/체성분은 매일 측정 안 함 — 최근 30일 최신값 유지
     try {
       final records = await _plugin.queryWeights(since, to);
       _logRecords('queryWeights → ${records.length} record(s)', records,
@@ -141,8 +141,11 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   }
 
   Future<void> _queryListByName(String name) async {
-    final to    = DateTime.now();
-    final since = to.subtract(const Duration(days: 30));
+    final to = DateTime.now();
+    // 키는 매일 측정 안 함 → 최근 30일 최신값 유지. 그 외(혈당·혈압·영양·물·걸음구간 등)는 오늘치만.
+    final since = name == 'height'
+        ? to.subtract(const Duration(days: 30))
+        : DateTime(to.year, to.month, to.day); // 오늘 0시(로컬)
     try {
       final records = switch (name) {
         'blood_glucose'    => await _plugin.queryBloodGlucose(since, to),
@@ -151,9 +154,8 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         'medication'       => await _plugin.queryMedication(since, to),      // iOS 전용 (iOS 26+)
         'nutrition'        => await _plugin.queryNutrition(since, to),
         'water_intake'     => await _plugin.queryWaterIntake(since, to),
-        'floors_climbed'   => await _plugin.queryFloorsClimbed(since, to),
-        'body_temperature' => await _plugin.queryBodyTemperature(since, to),
-        'step_segment'     => await _plugin.queryStepSegments(since, to),    // iOS 전용
+        'step_segment'     => await _plugin.queryStepSegments(since, to),    // iOS=개별 샘플 / Android=분 버킷 집계
+        'height'           => await _plugin.queryHeight(since, to),          // iOS=HealthKit 샘플 / Android=UserProfile (cm)
         _ => <HealthRecord>[],
       };
       _logRecords('$name → ${records.length} record(s)', records,
@@ -413,11 +415,11 @@ class _ButtonGrid extends StatelessWidget {
             OutlinedButton(onPressed: onQueryMetric, child: const Text('Metric (걸음·칼로리·거리·심박)')),
             OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')),
             OutlinedButton(onPressed: onQueryDaily,  child: const Text('Daily Summary')),
-            OutlinedButton(onPressed: () => onQueryByName('floors_climbed'), child: const Text('층수')),
             OutlinedButton(onPressed: () => onQueryByName('step_segment'),   child: const Text('걸음 구간')),
           ]),
           _section('신체·체성분', [
             OutlinedButton(onPressed: onQueryWeight, child: const Text('체중')),
+            OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키')),
           ]),
           _section('대사·혈액', [
             OutlinedButton(onPressed: () => onQueryByName('blood_glucose'),    child: const Text('혈당')),
@@ -426,9 +428,6 @@ class _ButtonGrid extends StatelessWidget {
             OutlinedButton(onPressed: () => onQueryByName('water_intake'),     child: const Text('물 섭취')),
             OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS)')),
             OutlinedButton(onPressed: () => onQueryByName('medication'),       child: const Text('투여약 복용로그 (iOS)')),
-          ]),
-          _section('체온', [
-            OutlinedButton(onPressed: () => onQueryByName('body_temperature'), child: const Text('체온')),
           ]),
           _section('운동', [
             OutlinedButton(onPressed: onQueryExercise, child: const Text('운동 세션 (1 day)')),
