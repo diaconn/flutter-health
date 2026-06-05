@@ -217,7 +217,7 @@ final sessions = await health.queryEndedSleepSessions(from, to);
 |---|---|---|
 | source | `samsung_health` | `apple_health` |
 | 백그라운드 정확한 5분 루프 | WorkManager로 구현 가능 | OS 재량 (`BGAppRefreshTask`) — 정확도 보장 불가 |
-| 운동 `strength_training` | 삼성헬스 미지원 → `other` | `.traditionalStrengthTraining` 등 매핑 |
+| 운동 종목 (`exerciseType`) | `PredefinedExerciseType` 이름 소문자화(예: `table_tennis`,`bench_press`), 비운동/UNDEFINED만 `other` | `HKWorkoutActivityType` case 이름 snake_case(예: `cycling`,`table_tennis`), 비운동/미상 `other` — 동의어 통합·표시명은 코드테이블 |
 | 거리 | 모든 활동 포함 | 걷기·달리기만 (`distanceWalkingRunning`) |
 | 체중 BMI / 체지방률 | BODY_COMPOSITION에 포함된 경우 동반 반환 | 항상 null (`.bodyMass`만 조회) |
 

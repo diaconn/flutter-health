@@ -155,7 +155,7 @@ final class HealthKitClient: @unchecked Sendable {
         return records
     }
 
-    /// HKWorkout 의 statistics·events·activities·metadata·device 를 한 레코드로 통합.
+    /// HKWorkout → 공통 필드(종목·시간·칼로리·심박·거리)만 추출.
     private func buildExerciseRecord(_ workout: HKWorkout, tz: String) async -> HealthRecord? {
         let startMs = toMs(workout.startDate)
         let endMs = toMs(workout.endDate)
@@ -163,14 +163,11 @@ final class HealthKitClient: @unchecked Sendable {
         guard durationMin > 0 else { return nil }
 
         let bpm = HKUnit(from: "count/min")
-        let mPerSec = HKUnit.meter().unitDivided(by: HKUnit.second())
-        let cpm = HKUnit(from: "count/min")
-        let watt = HKUnit.watt()
 
         var v = ExerciseValue(exerciseType: mapWorkoutType(workout.workoutActivityType))
-        v.durationMin = durationMin
+        v.duration = durationMin
 
-        // 칼로리·HR·거리·걸음 (statistics)
+        // 칼로리·HR·거리 (statistics)
         // 수동 추가 워크아웃은 statistics(for:) 가 nil → totalEnergyBurned 로 폴백 (워치는 statistics 가 채워져 이중계산 없음).
         v.calories = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
             ?? workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
@@ -178,124 +175,10 @@ final class HealthKitClient: @unchecked Sendable {
         v.heartRateAvg = (hrStats?.averageQuantity()?.doubleValue(for: bpm)).map(Int.init)
         v.heartRateMax = (hrStats?.maximumQuantity()?.doubleValue(for: bpm)).map(Int.init)
         v.heartRateMin = (hrStats?.minimumQuantity()?.doubleValue(for: bpm)).map(Int.init)
-        v.intensity = deriveIntensity(heartRateAvg: v.heartRateAvg)
+        // 거리 기반 운동(running·walking·cycling·swimming)만 채워지고, 비거리 운동은 nil.
         v.distance = workout.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meter())
             ?? workout.statistics(for: HKQuantityType(.distanceCycling))?.sumQuantity()?.doubleValue(for: .meter())
             ?? workout.statistics(for: HKQuantityType(.distanceSwimming))?.sumQuantity()?.doubleValue(for: .meter())
-        if let steps = workout.statistics(for: HKQuantityType(.stepCount))?.sumQuantity()?.doubleValue(for: .count()) {
-            v.count = Int(steps)
-            v.countType = "step"
-        }
-
-        // 파워/케이던스/속도 (iOS 16+/17+) — 모달리티별
-        if #available(iOS 16.0, *) {
-            let runPow = workout.statistics(for: HKQuantityType(.runningPower))
-            let runSpd = workout.statistics(for: HKQuantityType(.runningSpeed))
-            v.maxPower = runPow?.maximumQuantity()?.doubleValue(for: watt)
-            v.meanPower = runPow?.averageQuantity()?.doubleValue(for: watt)
-            v.maxSpeed = runSpd?.maximumQuantity()?.doubleValue(for: mPerSec)
-            v.meanSpeed = runSpd?.averageQuantity()?.doubleValue(for: mPerSec)
-        }
-        if #available(iOS 17.0, *) {
-            // 자전거 파워가 더 일반적이라 RunningPower 결과보다 우선
-            if let cycPow = workout.statistics(for: HKQuantityType(.cyclingPower)) {
-                v.maxPower = cycPow.maximumQuantity()?.doubleValue(for: watt) ?? v.maxPower
-                v.meanPower = cycPow.averageQuantity()?.doubleValue(for: watt) ?? v.meanPower
-            }
-            if let cycSpd = workout.statistics(for: HKQuantityType(.cyclingSpeed)) {
-                v.maxSpeed = cycSpd.maximumQuantity()?.doubleValue(for: mPerSec) ?? v.maxSpeed
-                v.meanSpeed = cycSpd.averageQuantity()?.doubleValue(for: mPerSec) ?? v.meanSpeed
-            }
-            if let cad = workout.statistics(for: HKQuantityType(.cyclingCadence)) {
-                v.maxCadence = cad.maximumQuantity()?.doubleValue(for: cpm)
-                v.meanCadence = cad.averageQuantity()?.doubleValue(for: cpm)
-            }
-        }
-
-        // metadata 매핑
-        let md = workout.metadata ?? [:]
-        v.altitudeGain = (md[HKMetadataKeyElevationAscended] as? HKQuantity)?.doubleValue(for: .meter())
-        v.altitudeLoss = (md[HKMetadataKeyElevationDescended] as? HKQuantity)?.doubleValue(for: .meter())
-        v.isIndoor = md[HKMetadataKeyIndoorWorkout] as? Bool
-        // 문자열 단위 파서는 NSException 위험 → 빌더 API 로 MET 단위 구성.
-        let metsUnit = HKUnit.kilocalorie().unitDivided(
-            by: HKUnit.hour().unitMultiplied(by: HKUnit.gramUnit(with: .kilo))
-        )
-        v.averageMets = (md[HKMetadataKeyAverageMETs] as? HKQuantity)?.doubleValue(for: metsUnit)
-        if let cond = md[HKMetadataKeyWeatherCondition] as? Int {
-            v.weatherCondition = mapWeatherCondition(cond)
-        }
-        v.weatherTemperature = (md[HKMetadataKeyWeatherTemperature] as? HKQuantity)?.doubleValue(for: .degreeCelsius())
-        // percent() 는 0~1 분율 → %(0~100)로 변환.
-        v.weatherHumidity = (md[HKMetadataKeyWeatherHumidity] as? HKQuantity)
-            .map { $0.doubleValue(for: HKUnit.percent()) * 100 }
-
-        // 수영 metadata
-        let poolLen = (md[HKMetadataKeyLapLength] as? HKQuantity)?.doubleValue(for: .meter())
-        let swimLoc = (md[HKMetadataKeySwimmingLocationType] as? Int).flatMap(mapSwimmingLocation)
-        let swimStr = (md[HKMetadataKeySwimmingStrokeStyle] as? Int).flatMap(mapSwimmingStroke)
-        if poolLen != nil || swimLoc != nil || swimStr != nil {
-            v.swimming = ExerciseSwimmingInfo(
-                poolLength: poolLen.map { Int($0) },
-                poolLengthUnit: poolLen != nil ? "m" : nil,
-                totalDistance: nil,
-                totalDurationSec: nil,
-                locationType: swimLoc,
-                strokeStyle: swimStr
-            )
-        }
-
-        // events (HKWorkoutEvent)
-        if let evs = workout.workoutEvents, !evs.isEmpty {
-            v.events = evs.map { ev in
-                ExerciseEventValue(
-                    type: mapWorkoutEventType(ev.type),
-                    startMs: Int64(ev.dateInterval.start.timeIntervalSince1970 * 1000),
-                    endMs: Int64(ev.dateInterval.end.timeIntervalSince1970 * 1000),
-                    metadata: nil
-                )
-            }
-        }
-
-        // activities (iOS 16+ HKWorkoutActivity)
-        if #available(iOS 16.0, *) {
-            let acts = workout.workoutActivities
-            if !acts.isEmpty {
-                v.activities = acts.map { act in
-                    let actStart = act.startDate
-                    let actEnd = act.endDate ?? workout.endDate
-                    let actDurMin = Int(actEnd.timeIntervalSince(actStart) / 60)
-                    let actCal = act.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
-                    let actDist = act.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meter())
-                        ?? act.statistics(for: HKQuantityType(.distanceCycling))?.sumQuantity()?.doubleValue(for: .meter())
-                        ?? act.statistics(for: HKQuantityType(.distanceSwimming))?.sumQuantity()?.doubleValue(for: .meter())
-                    let actIsIndoor = act.metadata?[HKMetadataKeyIndoorWorkout] as? Bool
-                    return ExerciseActivityValue(
-                        activityType: mapWorkoutType(act.workoutConfiguration.activityType),
-                        startMs: Int64(actStart.timeIntervalSince1970 * 1000),
-                        endMs: Int64(actEnd.timeIntervalSince1970 * 1000),
-                        durationMin: actDurMin,
-                        calories: actCal,
-                        distance: actDist,
-                        isIndoor: actIsIndoor
-                    )
-                }
-            }
-        }
-
-        // device
-        if let d = workout.device {
-            v.device = ExerciseDeviceValue(
-                name: d.name,
-                manufacturer: d.manufacturer,
-                model: d.model,
-                hardwareVersion: d.hardwareVersion,
-                firmwareVersion: d.firmwareVersion,
-                softwareVersion: d.softwareVersion,
-                localIdentifier: d.localIdentifier,
-                udiDeviceIdentifier: d.udiDeviceIdentifier
-            )
-        }
 
         return HealthRecord(
             dataType: Self.dataTypeExercise,
@@ -306,80 +189,6 @@ final class HealthKitClient: @unchecked Sendable {
             valueJson: encodeToJson(v),
             createdAt: toMs(Date())
         )
-    }
-
-    /// HKWorkoutEventType → 문자열 매핑 (Android 패턴과 통일).
-    private func mapWorkoutEventType(_ t: HKWorkoutEventType) -> String {
-        switch t {
-        case .pause: return "pause"
-        case .resume: return "resume"
-        case .lap: return "lap"
-        case .marker: return "marker"
-        case .motionPaused: return "motionPaused"
-        case .motionResumed: return "motionResumed"
-        case .segment: return "segment"
-        case .pauseOrResumeRequest: return "pauseOrResumeRequest"
-        @unknown default: return "unknown"
-        }
-    }
-
-    /// HKWeatherCondition rawValue → snake_case 문자열 매핑.
-    /// rawValue 정의: HealthKit `HKMetadataEnums.h:208~237` (None=0 ~ Tornado=27).
-    private func mapWeatherCondition(_ raw: Int) -> String? {
-        switch raw {
-        case 0: return nil          // None — 데이터 없음
-        case 1: return "clear"
-        case 2: return "fair"
-        case 3: return "partly_cloudy"
-        case 4: return "mostly_cloudy"
-        case 5: return "cloudy"
-        case 6: return "foggy"
-        case 7: return "haze"
-        case 8: return "windy"
-        case 9: return "blustery"
-        case 10: return "smoky"
-        case 11: return "dust"
-        case 12: return "snow"
-        case 13: return "hail"
-        case 14: return "sleet"
-        case 15: return "freezing_drizzle"
-        case 16: return "freezing_rain"
-        case 17: return "mixed_rain_and_hail"
-        case 18: return "mixed_rain_and_snow"
-        case 19: return "mixed_rain_and_sleet"
-        case 20: return "mixed_snow_and_sleet"
-        case 21: return "drizzle"
-        case 22: return "scattered_showers"
-        case 23: return "showers"
-        case 24: return "thunderstorms"
-        case 25: return "tropical_storm"
-        case 26: return "hurricane"
-        case 27: return "tornado"
-        default: return nil
-        }
-    }
-
-    /// HKSwimmingLocationType rawValue → 문자열.
-    private func mapSwimmingLocation(_ raw: Int) -> String? {
-        switch raw {
-        case 1: return "Pool"
-        case 2: return "OpenWater"
-        default: return nil
-        }
-    }
-
-    /// HKSwimmingStrokeStyle rawValue → 문자열.
-    private func mapSwimmingStroke(_ raw: Int) -> String? {
-        switch raw {
-        case 0: return "Unknown"
-        case 1: return "Mixed"
-        case 2: return "Freestyle"
-        case 3: return "Backstroke"
-        case 4: return "Breaststroke"
-        case 5: return "Butterfly"
-        case 6: return "Kickboard"
-        default: return nil
-        }
     }
 
     func queryHourlySummary(from hourStart: Date, to hourEnd: Date) async -> HealthRecord? {
@@ -1145,27 +954,91 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    // deprecated·.other·미래 case만 default → "other".
     private func mapWorkoutType(_ type: HKWorkoutActivityType) -> String {
         switch type {
-        case .walking: return "walking"
-        case .running: return "running"
+        case .americanFootball: return "american_football"
+        case .archery: return "archery"
+        case .australianFootball: return "australian_football"
+        case .badminton: return "badminton"
+        case .baseball: return "baseball"
+        case .basketball: return "basketball"
+        case .bowling: return "bowling"
+        case .boxing: return "boxing"
+        case .climbing: return "climbing"
+        case .cricket: return "cricket"
+        case .crossTraining: return "cross_training"
+        case .curling: return "curling"
         case .cycling: return "cycling"
-        case .swimming: return "swimming"
-        case .hiking: return "hiking"
-        case .traditionalStrengthTraining, .functionalStrengthTraining, .coreTraining: return "strength_training"
-        case .yoga, .mindAndBody: return "yoga"
+        case .dance: return "dance"
         case .elliptical: return "elliptical"
-        case .dance, .danceInspiredTraining, .socialDance, .barre: return "dance"
+        case .equestrianSports: return "equestrian_sports"
+        case .fencing: return "fencing"
+        case .fishing: return "fishing"
+        case .functionalStrengthTraining: return "functional_strength_training"
+        case .golf: return "golf"
+        case .gymnastics: return "gymnastics"
+        case .handball: return "handball"
+        case .hiking: return "hiking"
+        case .hockey: return "hockey"
+        case .hunting: return "hunting"
+        case .lacrosse: return "lacrosse"
+        case .martialArts: return "martial_arts"
+        case .mindAndBody: return "mind_and_body"
+        case .paddleSports: return "paddle_sports"
+        case .racquetball: return "racquetball"
+        case .rowing: return "rowing"
+        case .rugby: return "rugby"
+        case .running: return "running"
+        case .sailing: return "sailing"
+        case .skatingSports: return "skating_sports"
+        case .snowSports: return "snow_sports"
+        case .soccer: return "soccer"
+        case .softball: return "softball"
+        case .squash: return "squash"
+        case .stairClimbing: return "stair_climbing"
+        case .stairs: return "stairs"
+        case .surfingSports: return "surfing_sports"
+        case .swimming: return "swimming"
+        case .tableTennis: return "table_tennis"
+        case .tennis: return "tennis"
+        case .trackAndField: return "track_and_field"
+        case .traditionalStrengthTraining: return "traditional_strength_training"
+        case .volleyball: return "volleyball"
+        case .walking: return "walking"
+        case .waterFitness: return "water_fitness"
+        case .waterPolo: return "water_polo"
+        case .waterSports: return "water_sports"
+        case .wrestling: return "wrestling"
+        case .yoga: return "yoga"
+        case .barre: return "barre"
+        case .coreTraining: return "core_training"
+        case .crossCountrySkiing: return "cross_country_skiing"
+        case .downhillSkiing: return "downhill_skiing"
+        case .flexibility: return "flexibility"
+        case .highIntensityIntervalTraining: return "high_intensity_interval_training"
+        case .jumpRope: return "jump_rope"
+        case .kickboxing: return "kickboxing"
+        case .pilates: return "pilates"
+        case .snowboarding: return "snowboarding"
+        case .stepTraining: return "step_training"
+        case .wheelchairWalkPace: return "wheelchair_walk_pace"
+        case .wheelchairRunPace: return "wheelchair_run_pace"
+        case .taiChi: return "tai_chi"
+        case .mixedCardio: return "mixed_cardio"
+        case .handCycling: return "hand_cycling"
+        case .discSports: return "disc_sports"
+        case .fitnessGaming: return "fitness_gaming"
+        case .cardioDance: return "cardio_dance"
+        case .socialDance: return "social_dance"
+        case .pickleball: return "pickleball"
+        case .swimBikeRun: return "swim_bike_run"
+        case .underwaterDiving: return "underwater_diving"
+        case .preparationAndRecovery: return "preparation_and_recovery"
+        case .cooldown: return "cooldown"
+        case .play: return "play"
+        case .transition: return "transition"
         default: return "other"
-        }
-    }
-
-    private func deriveIntensity(heartRateAvg: Int?) -> String? {
-        guard let hr = heartRateAvg else { return nil }
-        switch hr {
-        case ..<100: return "low"
-        case 100..<140: return "medium"
-        default: return "high"
         }
     }
 
@@ -1220,73 +1093,15 @@ final class HealthKitClient: @unchecked Sendable {
         let stages: [SleepStageValue]?
     }
 
-    fileprivate struct ExerciseSwimmingInfo: Codable {
-        let poolLength: Int?
-        let poolLengthUnit: String?
-        let totalDistance: Double?
-        let totalDurationSec: Int?
-        let locationType: String?      // "Pool" | "OpenWater"
-        let strokeStyle: String?       // "Unknown"|"Mixed"|"Freestyle"|"Backstroke"|"Breaststroke"|"Butterfly"|"Kickboard"
-    }
-
-    fileprivate struct ExerciseEventValue: Codable {
-        let type: String               // "pause"|"resume"|"lap"|"marker"|"segment"|"motionPaused"|"motionResumed"|"pauseOrResumeRequest"
-        let startMs: Int64
-        let endMs: Int64
-        let metadata: String?          // JSON string (optional metadata)
-    }
-
-    fileprivate struct ExerciseActivityValue: Codable {
-        let activityType: String
-        let startMs: Int64
-        let endMs: Int64
-        let durationMin: Int?
-        let calories: Double?
-        let distance: Double?
-        let isIndoor: Bool?
-    }
-
-    fileprivate struct ExerciseDeviceValue: Codable {
-        let name: String?
-        let manufacturer: String?
-        let model: String?
-        let hardwareVersion: String?
-        let firmwareVersion: String?
-        let softwareVersion: String?
-        let localIdentifier: String?
-        let udiDeviceIdentifier: String?
-    }
-
-    /// Swift 타입체커가 30+ 파라미터 init 을 풀지 못해 var + nil 기본값 으로 정의.
-    /// 사용 패턴: `var v = ExerciseValue(exerciseType: t); v.calories = ...; v.heartRate... = ...`
+    /// iOS·Android 공통 필드만 유지. 시작~종료 시각은 HealthRecord.timestamp/endTimestamp(envelope).
     fileprivate struct ExerciseValue: Codable {
         var exerciseType: String
-        var intensity: String? = nil
-        var durationMin: Int? = nil
+        var duration: Int? = nil
         var calories: Double? = nil
+        var distance: Double? = nil
         var heartRateAvg: Int? = nil
         var heartRateMax: Int? = nil
         var heartRateMin: Int? = nil
-        var distance: Double? = nil
-        var altitudeGain: Double? = nil
-        var altitudeLoss: Double? = nil
-        var count: Int? = nil
-        var countType: String? = nil
-        var maxSpeed: Double? = nil
-        var meanSpeed: Double? = nil
-        var maxCadence: Double? = nil
-        var meanCadence: Double? = nil
-        var maxPower: Double? = nil
-        var meanPower: Double? = nil
-        var swimming: ExerciseSwimmingInfo? = nil
-        var events: [ExerciseEventValue]? = nil
-        var activities: [ExerciseActivityValue]? = nil
-        var isIndoor: Bool? = nil
-        var averageMets: Double? = nil
-        var weatherCondition: String? = nil
-        var weatherTemperature: Double? = nil
-        var weatherHumidity: Double? = nil
-        var device: ExerciseDeviceValue? = nil
     }
 
     private struct HourlySummaryValue: Codable {

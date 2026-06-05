@@ -734,31 +734,8 @@ class SamsungHealthClient(private val context: Context) {
         val durationMs = session?.duration?.toMillis() ?: (endMs - startMs)
         val heartRateAvg = session?.meanHeartRate?.let { if (it > 0f) it.toInt() else null }
 
-        // Samsung 은 "측정 안 됨" 을 -1000 sentinel 또는 0 으로 표현한다.
-        // altitude 는 음수 정상값 가능(해수면 아래)하므로 -999 초과만 valid 로 본다.
-        // 다른 누적/속도/cadence/power 값은 0 이하면 측정 실패로 간주한다.
-        fun Float.altitudeOrNull(): Double? = toDouble().takeIf { it > -999.0 }
+        // Samsung 은 "측정 안 됨" 을 0 으로 표현 → 0 이하는 측정 실패로 간주(null).
         fun Float.posOrNull(): Double? = toDouble().takeIf { it > 0.0 }
-
-        val log = session?.log?.takeIf { it.isNotEmpty() }?.map { entry ->
-            ExerciseLogPoint(
-                timestampMs = entry.timestamp.toEpochMilli(),
-                heartRate = entry.heartRate?.posOrNull(),
-                cadence = entry.cadence?.posOrNull(),
-                count = entry.count?.takeIf { it > 0 },
-                power = entry.power?.posOrNull(),
-                speed = entry.speed?.posOrNull()
-            )
-        }
-
-        val swimming = session?.swimmingLog?.let { sw ->
-            SwimmingInfo(
-                poolLength = sw.poolLength.takeIf { it > 0 },
-                poolLengthUnit = sw.poolLengthUnit?.takeIf { it.isNotBlank() },
-                totalDistance = sw.totalDistance?.posOrNull(),
-                totalDurationSec = sw.totalDuration?.seconds?.toInt()?.takeIf { it > 0 }
-            )
-        }
 
         return HealthRecord(
             dataType = DATA_TYPE_EXERCISE,
@@ -768,35 +745,12 @@ class SamsungHealthClient(private val context: Context) {
             source = SOURCE,
             valueJson = json.encodeToString(ExerciseValue(
                 exerciseType = mapExerciseType(exerciseType),
-                intensity = deriveIntensity(heartRateAvg),
-                durationMin = (durationMs / 60000L).toInt().takeIf { it > 0 },
+                duration = (durationMs / 60000L).toInt().takeIf { it > 0 },
                 calories = session?.calories?.posOrNull(),
+                distance = session?.distance?.posOrNull(),
                 heartRateAvg = heartRateAvg,
                 heartRateMax = session?.maxHeartRate?.posOrNull()?.toInt(),
                 heartRateMin = session?.minHeartRate?.posOrNull()?.toInt(),
-                distance = session?.distance?.posOrNull(),
-                altitudeGain = session?.altitudeGain?.posOrNull(),
-                altitudeLoss = session?.altitudeLoss?.posOrNull(),
-                maxAltitude = session?.maxAltitude?.altitudeOrNull(),
-                minAltitude = session?.minAltitude?.altitudeOrNull(),
-                count = session?.count?.takeIf { it > 0 },
-                countType = session?.countType?.name?.takeIf { it != "UNDEFINED" }?.lowercase(),
-                maxSpeed = session?.maxSpeed?.posOrNull(),
-                meanSpeed = session?.meanSpeed?.posOrNull(),
-                maxCadence = session?.maxCadence?.posOrNull(),
-                meanCadence = session?.meanCadence?.posOrNull(),
-                maxCalorieBurnRate = session?.maxCalorieBurnRate?.posOrNull(),
-                meanCalorieBurnRate = session?.meanCalorieBurnRate?.posOrNull(),
-                inclineDistance = session?.inclineDistance?.posOrNull(),
-                declineDistance = session?.declineDistance?.posOrNull(),
-                maxPower = session?.maxPower?.posOrNull(),
-                meanPower = session?.meanPower?.posOrNull(),
-                maxRpm = session?.maxRpm?.posOrNull(),
-                meanRpm = session?.meanRpm?.posOrNull(),
-                comment = session?.comment?.takeIf { it.isNotBlank() },
-                customTitle = session?.customTitle?.takeIf { it.isNotBlank() },
-                log = log,
-                swimming = swimming
             )),
             createdAt = System.currentTimeMillis(),
         )
@@ -810,32 +764,15 @@ class SamsungHealthClient(private val context: Context) {
         else -> "light"
     }
 
+    // PredefinedExerciseType(113종) → enum 이름 소문자 그대로 통과(TABLE_TENNIS→"table_tennis", 신규 자동 대응).
     private fun mapExerciseType(type: DataType.ExerciseType.PredefinedExerciseType): String = when (type) {
-        DataType.ExerciseType.PredefinedExerciseType.WALKING -> "walking"
-        DataType.ExerciseType.PredefinedExerciseType.RUNNING,
-        DataType.ExerciseType.PredefinedExerciseType.TRACK_RUNNING -> "running"
-        DataType.ExerciseType.PredefinedExerciseType.BIKING,
-        DataType.ExerciseType.PredefinedExerciseType.MOUNTAIN_BIKING,
-        DataType.ExerciseType.PredefinedExerciseType.STATIONARY_BIKING -> "cycling"
-        DataType.ExerciseType.PredefinedExerciseType.POOL_SWIMMING,
-        DataType.ExerciseType.PredefinedExerciseType.OPEN_WATER_SWIMMING -> "swimming"
-        DataType.ExerciseType.PredefinedExerciseType.HIKING,
-        DataType.ExerciseType.PredefinedExerciseType.BACKPACKING -> "hiking"
-        DataType.ExerciseType.PredefinedExerciseType.YOGA -> "yoga"
-        DataType.ExerciseType.PredefinedExerciseType.ELLIPTICAL -> "elliptical"
-        DataType.ExerciseType.PredefinedExerciseType.DANCING,
-        DataType.ExerciseType.PredefinedExerciseType.BALLROOM_DANCING,
-        DataType.ExerciseType.PredefinedExerciseType.BALLET -> "dance"
-        else -> "other"
-    }
-
-    private fun deriveIntensity(heartRateAvg: Int?): String? {
-        heartRateAvg ?: return null
-        return when {
-            heartRateAvg < 100 -> "low"
-            heartRateAvg < 140 -> "medium"
-            else -> "high"
-        }
+        DataType.ExerciseType.PredefinedExerciseType.UNDEFINED,
+        DataType.ExerciseType.PredefinedExerciseType.OTHER,
+        DataType.ExerciseType.PredefinedExerciseType.BREAK,
+        DataType.ExerciseType.PredefinedExerciseType.COOL_DOWN,
+        DataType.ExerciseType.PredefinedExerciseType.WARM_UP,
+        DataType.ExerciseType.PredefinedExerciseType.TRANSITION -> "other"
+        else -> type.name.lowercase()
     }
 
     // --- valueJson 직렬화용 내부 데이터 클래스 ---
@@ -869,55 +806,14 @@ class SamsungHealthClient(private val context: Context) {
     )
 
     @Serializable
-    private data class ExerciseLogPoint(
-        val timestampMs: Long,
-        val heartRate: Double?,
-        val cadence: Double?,
-        val count: Int?,
-        val power: Double?,
-        val speed: Double?
-    )
-
-    @Serializable
-    private data class SwimmingInfo(
-        val poolLength: Int?,
-        val poolLengthUnit: String?,
-        val totalDistance: Double?,
-        val totalDurationSec: Int?
-    )
-
-    @Serializable
     private data class ExerciseValue(
         val exerciseType: String,
-        val intensity: String?,
-        val durationMin: Int?,
+        val duration: Int?,
         val calories: Double?,
+        val distance: Double?,
         val heartRateAvg: Int?,
         val heartRateMax: Int?,
-        val heartRateMin: Int?,
-        val distance: Double?,
-        val altitudeGain: Double?,
-        val altitudeLoss: Double?,
-        val maxAltitude: Double?,
-        val minAltitude: Double?,
-        val count: Int?,
-        val countType: String?,
-        val maxSpeed: Double?,
-        val meanSpeed: Double?,
-        val maxCadence: Double?,
-        val meanCadence: Double?,
-        val maxCalorieBurnRate: Double?,
-        val meanCalorieBurnRate: Double?,
-        val inclineDistance: Double?,
-        val declineDistance: Double?,
-        val maxPower: Double?,
-        val meanPower: Double?,
-        val maxRpm: Double?,
-        val meanRpm: Double?,
-        val comment: String?,
-        val customTitle: String?,
-        val log: List<ExerciseLogPoint>?,
-        val swimming: SwimmingInfo?
+        val heartRateMin: Int?
     )
 
     @Serializable
