@@ -12,10 +12,10 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'flutter_health demo',
-        theme: ThemeData(colorSchemeSeed: Colors.teal),
-        home: const HealthDemoPage(),
-      );
+    title: 'flutter_health demo',
+    theme: ThemeData(colorSchemeSeed: Colors.teal),
+    home: const HealthDemoPage(),
+  );
 }
 
 class HealthDemoPage extends StatefulWidget {
@@ -80,7 +80,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   }
 
   Future<void> _queryMetric() async {
-    final to   = DateTime.now();
+    final to = DateTime.now();
     final from = to.subtract(const Duration(minutes: 5));
     try {
       final record = await _plugin.queryMetric(from, to);
@@ -95,21 +95,20 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   }
 
   Future<void> _queryExercise() async {
-    final to    = DateTime.now();
+    final to = DateTime.now();
     final since = DateTime(to.year, to.month, to.day); // 오늘 0시(로컬) — 오늘 종료된 운동만
     try {
       final records = await _plugin.queryEndedExerciseSessions(since, to);
-      _logRecords('queryEndedExerciseSessions → ${records.length} session(s)', records,
-          (r) => '  exercise ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}\n${_prettyRecord(r)}');
+      _logRecords('queryEndedExerciseSessions → ${records.length} session(s)', records, (r) => '  exercise ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}\n${_prettyRecord(r)}');
     } catch (e) {
       _log('queryEndedExerciseSessions error: $e');
     }
   }
 
   Future<void> _queryHourly() async {
-    final now       = DateTime.now();
+    final now = DateTime.now();
     final hourStart = DateTime(now.year, now.month, now.day, now.hour);
-    final hourEnd   = hourStart.add(const Duration(hours: 1));
+    final hourEnd = hourStart.add(const Duration(hours: 1));
     try {
       final record = await _plugin.queryHourlySummary(hourStart, hourEnd);
       _log('queryHourlySummary [${_fmt(hourStart)}]\n${record == null ? 'null' : _prettyRecord(record)}');
@@ -129,12 +128,11 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   }
 
   Future<void> _queryWeight() async {
-    final to    = DateTime.now();
+    final to = DateTime.now();
     final since = to.subtract(const Duration(days: 30)); // 체중/체성분은 매일 측정 안 함 — 최근 30일 최신값 유지
     try {
       final records = await _plugin.queryWeights(since, to);
-      _logRecords('queryWeights → ${records.length} record(s)', records,
-          (r) => '  weight ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
+      _logRecords('queryWeights → ${records.length} record(s)', records, (r) => '  weight ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
     } catch (e) {
       _log('queryWeights error: $e');
     }
@@ -143,23 +141,20 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   Future<void> _queryListByName(String name) async {
     final to = DateTime.now();
     // 키는 매일 측정 안 함 → 최근 30일 최신값 유지. 그 외(혈당·혈압·영양·물·걸음구간 등)는 오늘치만.
-    final since = name == 'height'
-        ? to.subtract(const Duration(days: 30))
-        : DateTime(to.year, to.month, to.day); // 오늘 0시(로컬)
+    final since = name == 'height' ? to.subtract(const Duration(days: 30)) : DateTime(to.year, to.month, to.day); // 오늘 0시(로컬)
     try {
       final records = switch (name) {
-        'blood_glucose'    => await _plugin.queryBloodGlucose(since, to),
-        'blood_pressure'   => await _plugin.queryBloodPressure(since, to),
+        'blood_glucose' => await _plugin.queryBloodGlucose(since, to),
+        'blood_pressure' => await _plugin.queryBloodPressure(since, to),
         'insulin_delivery' => await _plugin.queryInsulinDelivery(since, to), // iOS 전용
-        'medication'       => await _plugin.queryMedication(since, to),      // iOS 전용 (iOS 26+)
-        'nutrition'        => await _plugin.queryNutrition(since, to),
-        'water_intake'     => await _plugin.queryWaterIntake(since, to),
-        'step_segment'     => await _plugin.queryStepSegments(since, to),    // iOS=개별 샘플 / Android=분 버킷 집계
-        'height'           => await _plugin.queryHeight(since, to),          // iOS=HealthKit 샘플 / Android=UserProfile (cm)
+        'medication' => await _plugin.queryMedication(since, to), // iOS 전용 (iOS 26+)
+        'nutrition' => await _plugin.queryNutrition(since, to),
+        'water_intake' => await _plugin.queryWaterIntake(since, to),
+        'step_segment' => await _plugin.queryStepSegments(since, to), // iOS=개별 샘플 / Android=분 버킷 집계
+        'height' => await _plugin.queryHeight(since, to), // iOS=HealthKit 샘플 / Android=UserProfile (cm)
         _ => <HealthRecord>[],
       };
-      _logRecords('$name → ${records.length} record(s)', records,
-          (r) => '  $name ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
+      _logRecords('$name → ${records.length} record(s)', records, (r) => '  $name ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
     } catch (e) {
       _log('$name error: $e');
     }
@@ -179,9 +174,9 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     // Fire immediately, then align to next wall-clock 5-min boundary.
     _queryMetric();
 
-    final now        = DateTime.now();
-    final msInCycle  = (now.minute % 5) * 60000 + now.second * 1000 + now.millisecond;
-    final msToNext   = 5 * 60000 - msInCycle;
+    final now = DateTime.now();
+    final msInCycle = (now.minute % 5) * 60000 + now.second * 1000 + now.millisecond;
+    final msToNext = 5 * 60000 - msInCycle;
     _loopTimer = Timer(Duration(milliseconds: msToNext), () {
       _queryMetric();
       _loopTimer = Timer.periodic(const Duration(minutes: 5), (_) => _queryMetric());
@@ -192,9 +187,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     if (_logs.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: _logs.first));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Copied last log to clipboard')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied last log to clipboard')));
     }
   }
 
@@ -202,9 +195,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   Future<void> _copyAllLogs() async {
     if (_logs.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No logs to copy')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No logs to copy')));
       }
       return;
     }
@@ -226,28 +217,21 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     final text = buf.toString();
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Copied ${ordered.length} logs (${text.length} chars)')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied ${ordered.length} logs (${text.length} chars)')));
     }
   }
 
-  String _fmt(DateTime d) =>
-      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  String _fmt(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   String _fmtMs(int ms) {
     final d = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
     return '${d.month}/${d.day} ${_fmt(d)}';
   }
 
-  /// 표시용 — 플러그인이 최신순(timestamp 내림차순)을 보장하므로 앞에서 [n]개만 취한다.
-  List<HealthRecord> _recent(List<HealthRecord> rs, int n) => rs.take(n).toList();
-
-  /// 한 쿼리의 레코드를 한 로그 블록으로 출력한다. _log() 가 0번에 prepend 하므로 레코드를
-  /// 개별 _log 하면 화면에서 배치가 뒤집혀(오래된 것이 위로) 보인다 — 묶어서 최신순(위→아래) 유지.
+  /// 한 쿼리의 레코드를 한 로그 블록으로 출력
   void _logRecords(String header, List<HealthRecord> records, String Function(HealthRecord) line) {
     final buf = StringBuffer(header);
-    for (final r in _recent(records, 5)) {
+    for (final r in records) {
       buf.write('\n${line(r)}');
     }
     _log(buf.toString());
@@ -282,21 +266,9 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
       appBar: AppBar(
         title: const Text('flutter_health demo'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.copy),
-            tooltip: 'Copy last log',
-            onPressed: _copyLastLog,
-          ),
-          IconButton(
-            icon: const Icon(Icons.ios_share),
-            tooltip: 'Copy ALL logs',
-            onPressed: _copyAllLogs,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            tooltip: 'Clear logs',
-            onPressed: () => setState(() => _logs.clear()),
-          ),
+          IconButton(icon: const Icon(Icons.copy), tooltip: 'Copy last log', onPressed: _copyLastLog),
+          IconButton(icon: const Icon(Icons.ios_share), tooltip: 'Copy ALL logs', onPressed: _copyAllLogs),
+          IconButton(icon: const Icon(Icons.delete_outline), tooltip: 'Clear logs', onPressed: () => setState(() => _logs.clear())),
         ],
       ),
       body: Column(
@@ -305,29 +277,18 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
           const Divider(height: 1),
           // 버튼 영역: 최대 화면 42% 까지만 차지하고 그 이상은 자체 스크롤.
           ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.42,
-            ),
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.42),
             child: SingleChildScrollView(
-              child: _ButtonGrid(
-                loopRunning: _loopRunning,
-                onConnect: _connect,
-                onRequestPermission: _requestPermission,
-                onQueryMetric: _queryMetric,
-                onQueryExercise: _queryExercise,
-                onQueryHourly: _queryHourly,
-                onQueryDaily: _queryDaily,
-                onQueryWeight: _queryWeight,
-                onToggleLoop: _toggleLoop,
-                onQueryByName: _queryListByName,
-              ),
+              child: _ButtonGrid(loopRunning: _loopRunning, onConnect: _connect, onRequestPermission: _requestPermission, onQueryMetric: _queryMetric, onQueryExercise: _queryExercise, onQueryHourly: _queryHourly, onQueryDaily: _queryDaily, onQueryWeight: _queryWeight, onToggleLoop: _toggleLoop, onQueryByName: _queryListByName),
             ),
           ),
           const Divider(height: 1),
           // 로그 영역: 남은 공간 전체 + 자체 스크롤.
           Expanded(
             child: _logs.isEmpty
-                ? const Center(child: Text('No logs yet', style: TextStyle(color: Colors.grey)))
+                ? const Center(
+                    child: Text('No logs yet', style: TextStyle(color: Colors.grey)),
+                  )
                 // SelectionArea + Text — 스크롤 가능한 ListView 안의 SelectableText 는
                 // 스크롤 시 'selection.isValid' assertion 을 던진다. SelectionArea 로 선택/복사를 대신 제공.
                 : SelectionArea(
@@ -335,10 +296,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
                       padding: const EdgeInsets.all(8),
                       itemCount: _logs.length,
                       separatorBuilder: (_, _) => const Divider(height: 8),
-                      itemBuilder: (_, i) => Text(
-                        _logs[i],
-                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-                      ),
+                      itemBuilder: (_, i) => Text(_logs[i], style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
                     ),
                   ),
           ),
@@ -350,27 +308,18 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
 
 class _StatusBar extends StatelessWidget {
   final bool available, connected, permitted;
+
   const _StatusBar({required this.available, required this.connected, required this.permitted});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _chip('Available', available),
-          _chip('Connected', connected),
-          _chip('Permitted', permitted),
-        ],
-      ),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [_chip('Available', available), _chip('Connected', connected), _chip('Permitted', permitted)]),
     );
   }
 
-  Widget _chip(String label, bool on) => Chip(
-        label: Text('$label: ${on ? '✓' : '✗'}'),
-        backgroundColor: on ? Colors.green.shade100 : Colors.red.shade100,
-      );
+  Widget _chip(String label, bool on) => Chip(label: Text('$label: ${on ? '✓' : '✗'}'), backgroundColor: on ? Colors.green.shade100 : Colors.red.shade100);
 }
 
 /// 플러그인은 공통(Android + iOS) 기능만 노출한다. (전용 기능은 SDK에서 제거됨)
@@ -382,18 +331,7 @@ class _ButtonGrid extends StatelessWidget {
   final VoidCallback onQueryHourly, onQueryDaily, onQueryWeight, onToggleLoop;
   final Future<void> Function(String) onQueryByName;
 
-  const _ButtonGrid({
-    required this.loopRunning,
-    required this.onConnect,
-    required this.onRequestPermission,
-    required this.onQueryMetric,
-    required this.onQueryExercise,
-    required this.onQueryHourly,
-    required this.onQueryDaily,
-    required this.onQueryWeight,
-    required this.onToggleLoop,
-    required this.onQueryByName,
-  });
+  const _ButtonGrid({required this.loopRunning, required this.onConnect, required this.onRequestPermission, required this.onQueryMetric, required this.onQueryExercise, required this.onQueryHourly, required this.onQueryDaily, required this.onQueryWeight, required this.onToggleLoop, required this.onQueryByName});
 
   @override
   Widget build(BuildContext context) {
@@ -403,35 +341,11 @@ class _ButtonGrid extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _section('연결 · 권한', [
-            FilledButton(onPressed: onConnect, child: const Text('Connect')),
-            FilledButton(onPressed: onRequestPermission, child: const Text('Request Permission')),
-            FilledButton.tonal(
-              onPressed: onToggleLoop,
-              child: Text(loopRunning ? 'Stop 5-min Loop' : 'Start 5-min Loop'),
-            ),
-          ]),
-          _section('기본지표', [
-            OutlinedButton(onPressed: onQueryMetric, child: const Text('Metric (걸음·칼로리·거리·심박)')),
-            OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')),
-            OutlinedButton(onPressed: onQueryDaily,  child: const Text('Daily Summary')),
-            OutlinedButton(onPressed: () => onQueryByName('step_segment'),   child: const Text('걸음 구간')),
-          ]),
-          _section('신체·체성분', [
-            OutlinedButton(onPressed: onQueryWeight, child: const Text('체중')),
-            OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키')),
-          ]),
-          _section('대사·혈액', [
-            OutlinedButton(onPressed: () => onQueryByName('blood_glucose'),    child: const Text('혈당')),
-            OutlinedButton(onPressed: () => onQueryByName('blood_pressure'),   child: const Text('혈압')),
-            OutlinedButton(onPressed: () => onQueryByName('nutrition'),        child: const Text('영양')),
-            OutlinedButton(onPressed: () => onQueryByName('water_intake'),     child: const Text('물 섭취')),
-            OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS)')),
-            OutlinedButton(onPressed: () => onQueryByName('medication'),       child: const Text('투여약 복용로그 (iOS)')),
-          ]),
-          _section('운동', [
-            OutlinedButton(onPressed: onQueryExercise, child: const Text('운동 세션 (1 day)')),
-          ]),
+          _section('연결 · 권한', [FilledButton(onPressed: onConnect, child: const Text('Connect')), FilledButton(onPressed: onRequestPermission, child: const Text('Request Permission')), FilledButton.tonal(onPressed: onToggleLoop, child: Text(loopRunning ? 'Stop 5-min Loop' : 'Start 5-min Loop'))]),
+          _section('기본지표', [OutlinedButton(onPressed: onQueryMetric, child: const Text('Metric (걸음·칼로리·거리·심박)')), OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary')), OutlinedButton(onPressed: () => onQueryByName('step_segment'), child: const Text('걸음 구간'))]),
+          _section('신체·체성분', [OutlinedButton(onPressed: onQueryWeight, child: const Text('체중')), OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키'))]),
+          _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryByName('blood_glucose'), child: const Text('혈당')), OutlinedButton(onPressed: () => onQueryByName('blood_pressure'), child: const Text('혈압')), OutlinedButton(onPressed: () => onQueryByName('nutrition'), child: const Text('영양')), OutlinedButton(onPressed: () => onQueryByName('water_intake'), child: const Text('물 섭취')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS)')), OutlinedButton(onPressed: () => onQueryByName('medication'), child: const Text('투여약 복용로그 (iOS)'))]),
+          _section('운동', [OutlinedButton(onPressed: onQueryExercise, child: const Text('운동 세션 (1 day)'))]),
           const SizedBox(height: 8),
         ],
       ),
@@ -439,19 +353,19 @@ class _ButtonGrid extends StatelessWidget {
   }
 
   Widget _section(String title, List<Widget> buttons) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 10, bottom: 4, left: 12),
-            child: Text(
-              title,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(left: 12),
-            child: Wrap(spacing: 8, runSpacing: 8, children: buttons),
-          ),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 10, bottom: 4, left: 12),
+        child: Text(
+          title,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: Wrap(spacing: 8, runSpacing: 8, children: buttons),
+      ),
+    ],
+  );
 }
