@@ -6,7 +6,11 @@ class ExerciseValue {
   /// 비운동/미상은 "other".
   final String exerciseType;
 
-  /// 운동 시간(분). 시작~종료(timestamp~endTimestamp)와 동일 의미의 분 단위 값.
+  /// 운동 시간(분). ⚠️ 플랫폼별 의미가 다르다 — 일시정지 포함 여부 주의.
+  /// - iOS = endDate−startDate (= timestamp~endTimestamp 벽시계). 일시정지 포함(총 경과시간).
+  ///   HKWorkout.duration(일시정지 제외)은 쓰지 않는다.
+  /// - Android = Samsung ExerciseSession.duration(첫 세션). 일시정지 제외(순수 운동시간) — 실기기 검증:
+  ///   자동 일시정지 시 운동시간이 증가하지 않음. 세션 없으면 endTime−startTime(벽시계, 일시정지 포함)으로 폴백.
   final int? duration;
 
   /// 소모 칼로리(kcal).
