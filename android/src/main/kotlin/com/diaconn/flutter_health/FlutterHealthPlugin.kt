@@ -160,7 +160,6 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             "queryBloodPressure",
             "queryNutrition",
             "queryWaterIntake",
-            "queryStepSegments",
             "queryHeight" -> {
                 val since = call.argument<Number>("since")?.toLong()
                 val to = call.argument<Number>("to")?.toLong()
@@ -175,7 +174,6 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                             "queryBloodPressure" -> client.queryBloodPressure(since, to)
                             "queryNutrition" -> client.queryNutrition(since, to)
                             "queryWaterIntake" -> client.queryWaterIntake(since, to)
-                            "queryStepSegments" -> client.queryStepSegments(since, to)
                             "queryHeight" -> client.queryHeight(since, to)
                             else -> emptyList()
                         }

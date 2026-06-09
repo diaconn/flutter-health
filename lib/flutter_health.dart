@@ -81,12 +81,11 @@ class FlutterHealth {
   Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryWaterIntake(since, to);
 
-  /// [since]~[to] 구간의 걸음 구간 (step_segment) 목록을 반환. 각 구간의 시작/종료는 envelope
+  /// [since]~[to] 구간의 걸음 구간 (step_segment) 목록을 반환. **iOS 전용.** 각 구간의 시작/종료는 envelope
   /// timestamp/endTimestamp, 구간별 걸음수는 value.count. metric 의 합산값(stepsDaily)과 다름.
   /// - iOS: 개별 stepCount 샘플(가변 시작/종료)을 그대로. value.sourceType = phone/watch/tablet/other
   ///   로 기기 구분(iPhone·워치 동시 기록 시 시간 겹침 가능 → 단순 합은 stepsDaily 와 다를 수 있음).
-  /// - Android(Samsung): STEPS 가 집계 전용이라 10분 단위 그룹 집계로 구간화(Samsung 내부 step bin=10분 —
-  ///   더 잦은 1분 그룹은 SDK 가 균등분배해 모든 구간 동일값으로 보간됨). value.sourceType 은 항상 "other".
+  /// - Android: 미지원(걸음은 walking 운동 세션으로 표시) → 빈 리스트 반환.
   Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryStepSegments(since, to);
 

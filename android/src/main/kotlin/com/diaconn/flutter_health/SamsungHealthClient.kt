@@ -19,8 +19,6 @@ import com.samsung.android.sdk.health.data.request.DataTypes
 import com.samsung.android.sdk.health.data.request.InstantTimeFilter
 import com.samsung.android.sdk.health.data.request.LocalDateFilter
 import com.samsung.android.sdk.health.data.request.LocalTimeFilter
-import com.samsung.android.sdk.health.data.request.LocalTimeGroup
-import com.samsung.android.sdk.health.data.request.LocalTimeGroupUnit
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
@@ -514,49 +512,6 @@ class SamsungHealthClient(private val context: Context) {
     }
 
     /**
-     * [since]~[to] 구간의 걸음 구간(step_segment) 목록. envelope timestamp/endTimestamp 가 각 구간의 시작/종료.
-     * iOS 는 개별 stepCount 샘플(가변 시작/종료)을 그대로 반환하지만, Samsung SDK 는 STEPS 가 비-Readable(집계 전용)
-     * 이라 개별 샘플을 못 준다. 대신 10분 단위 그룹 집계로 구간화 — Samsung 내부 걸음 저장 bin 이 10분이라,
-     * 그보다 잦은(1분) 그룹을 요청하면 SDK 가 bin 값을 균등 분배해 모든 구간이 같은 값으로 찍힌다(예: 30보/10분→1분마다 3).
-     * 10분이 보간 없는 최소 실측 입자. 걸음수 0 인 구간은 omit.
-     * sourceType 은 집계가 기기별로 안 쪼개져 판별 불가 → "other" 고정(phone/watch/tablet 구분은 iOS 한정).
-     * 그룹 집계는 페이지네이션되므로 pageToken 으로 전량 수집(누락 방지).
-     */
-    suspend fun queryStepSegments(since: Long, to: Long): List<HealthRecord> {
-        val s = store ?: return emptyList()
-        return runCatching {
-            val filter = LocalTimeFilter.of(since.toLocalDateTime(), to.toLocalDateTime())
-            val group = LocalTimeGroup.of(LocalTimeGroupUnit.MINUTELY, 10) // Samsung 내부 step bin = 10분; 더 잦으면 균등분배 보간
-            val tz = currentTzOffset()
-            val now = System.currentTimeMillis()
-            val records = mutableListOf<HealthRecord>()
-            var pageToken: String? = null
-            do {
-                val builder = DataType.StepsType.TOTAL.requestBuilder
-                    .setLocalTimeFilterWithGroup(filter, group)
-                pageToken?.let { builder.setPageToken(it) }
-                val response = s.aggregateData(builder.build())
-                response.dataList.forEach { agg ->
-                    val count = agg.value?.toInt()?.takeIf { it > 0 } ?: return@forEach
-                    val startMs = agg.startTime?.toEpochMilli() ?: return@forEach
-                    val endMs = agg.endTime?.toEpochMilli() ?: startMs
-                    records += HealthRecord(
-                        dataType = DATA_TYPE_STEP_SEGMENT,
-                        timestamp = startMs,
-                        endTimestamp = endMs,
-                        tzOffset = tz,
-                        source = SOURCE,
-                        valueJson = json.encodeToString(StepSegmentValue(count = count, sourceType = "other")),
-                        createdAt = now,
-                    )
-                }
-                pageToken = response.pageToken?.takeIf { it.isNotEmpty() }
-            } while (pageToken != null)
-            records.sortedByDescending { it.timestamp }
-        }.onFailure { Log.e(TAG, "걸음 구간 조회 실패", it) }.getOrDefault(emptyList())
-    }
-
-    /**
      * 사용자 프로필에 설정된 현재 키(신장) 1건. [since]/[to] 는 프로필 값이라 무시(시간 범위 없음).
      * UserProfile.HEIGHT 는 Samsung 앱 프로필 설정값 — 체성분 측정의 HEIGHT(직접 입력 경로 없어 제거됨)와 별개.
      */
@@ -910,10 +865,6 @@ class SamsungHealthClient(private val context: Context) {
 
 
     @Serializable
-    private data class StepSegmentValue(val count: Int, val sourceType: String)
-
-
-    @Serializable
     private data class HeightValue(val value: Double)
 
     companion object {
@@ -927,7 +878,6 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_BLOOD_PRESSURE = "blood_pressure"
         const val DATA_TYPE_NUTRITION = "nutrition"
         const val DATA_TYPE_WATER_INTAKE = "water_intake"
-        const val DATA_TYPE_STEP_SEGMENT = "step_segment"
         const val DATA_TYPE_HEIGHT = "height"
         const val SOURCE = "samsung_health"
 

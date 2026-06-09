@@ -150,7 +150,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         'medication' => await _plugin.queryMedication(since, to), // iOS 전용 (iOS 26+)
         'nutrition' => await _plugin.queryNutrition(since, to),
         'water_intake' => await _plugin.queryWaterIntake(since, to),
-        'step_segment' => await _plugin.queryStepSegments(since, to), // iOS=개별 샘플 / Android=분 버킷 집계
+        'step_segment' => await _plugin.queryStepSegments(since, to), // iOS 전용 (Android 미지원 → 빈 리스트)
         'height' => await _plugin.queryHeight(since, to), // iOS=HealthKit 샘플 / Android=UserProfile (cm)
         _ => <HealthRecord>[],
       };
@@ -342,7 +342,7 @@ class _ButtonGrid extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           _section('연결 · 권한', [FilledButton(onPressed: onConnect, child: const Text('Connect')), FilledButton(onPressed: onRequestPermission, child: const Text('Request Permission')), FilledButton.tonal(onPressed: onToggleLoop, child: Text(loopRunning ? 'Stop 5-min Loop' : 'Start 5-min Loop'))]),
-          _section('기본지표', [OutlinedButton(onPressed: onQueryMetric, child: const Text('Metric (걸음·칼로리·거리·심박)')), OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary')), OutlinedButton(onPressed: () => onQueryByName('step_segment'), child: const Text('걸음 구간'))]),
+          _section('기본지표', [OutlinedButton(onPressed: onQueryMetric, child: const Text('Metric (걸음·칼로리·거리·심박)')), OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary')), OutlinedButton(onPressed: () => onQueryByName('step_segment'), child: const Text('걸음 구간(iOS)'))]),
           _section('신체·체성분', [OutlinedButton(onPressed: onQueryWeight, child: const Text('체중')), OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키'))]),
           _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryByName('blood_glucose'), child: const Text('혈당')), OutlinedButton(onPressed: () => onQueryByName('blood_pressure'), child: const Text('혈압')), OutlinedButton(onPressed: () => onQueryByName('nutrition'), child: const Text('영양')), OutlinedButton(onPressed: () => onQueryByName('water_intake'), child: const Text('물 섭취')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS)')), OutlinedButton(onPressed: () => onQueryByName('medication'), child: const Text('투여약 복용로그 (iOS)'))]),
           _section('운동', [OutlinedButton(onPressed: onQueryExercise, child: const Text('운동 세션 (1 day)'))]),
