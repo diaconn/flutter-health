@@ -118,14 +118,7 @@ final class HealthKitClient: @unchecked Sendable {
             let endMs = toMs(session.end)
             let durationMin = Int((endMs - startMs) / 60000)
             guard durationMin > 0 else { return nil }
-            let value = SleepValue(
-                durationMin: durationMin,
-                awakeMin: session.awakeMin > 0 ? session.awakeMin : nil,
-                lightMin: session.lightMin > 0 ? session.lightMin : nil,
-                deepMin: session.deepMin > 0 ? session.deepMin : nil,
-                remMin: session.remMin > 0 ? session.remMin : nil,
-                stages: session.stages.isEmpty ? nil : session.stages
-            )
+            let value = SleepValue(durationMin: durationMin)
             return HealthRecord(
                 dataType: Self.dataTypeSleep,
                 timestamp: startMs,
@@ -912,8 +905,8 @@ final class HealthKitClient: @unchecked Sendable {
         var current: SleepSession? = nil
 
         for sample in sortedSamples {
-            let stageStr = mapSleepStage(sample.value)
-            guard stageStr != "awake" || current != nil else { continue }
+            let isAwake = HKCategoryValueSleepAnalysis(rawValue: sample.value) == .awake
+            guard !isAwake || current != nil else { continue }
 
             if current == nil {
                 current = SleepSession(start: sample.startDate, end: sample.endDate)
@@ -928,35 +921,12 @@ final class HealthKitClient: @unchecked Sendable {
             }
 
             session.end = max(session.end, sample.endDate)
-            let durationMin = Int(sample.endDate.timeIntervalSince(sample.startDate) / 60)
-            switch stageStr {
-            case "awake": session.awakeMin += durationMin
-            case "light": session.lightMin += durationMin
-            case "deep": session.deepMin += durationMin
-            case "rem": session.remMin += durationMin
-            default: break
-            }
-            let sStartMs = toMs(sample.startDate)
-            let sEndMs = toMs(sample.endDate)
-            session.stages.append(SleepStageValue(stage: stageStr, startMs: sStartMs, endMs: sEndMs))
             current = session
         }
         if let session = current {
             sessions.append(session)
         }
         return sessions
-    }
-
-    private func mapSleepStage(_ value: Int) -> String {
-        guard let stage = HKCategoryValueSleepAnalysis(rawValue: value) else { return "light" }
-        switch stage {
-        case .awake: return "awake"
-        case .asleepCore: return "light"
-        case .asleepREM: return "rem"
-        case .asleepDeep: return "deep"
-        case .asleepUnspecified, .inBed: return "light"
-        @unknown default: return "light"
-        }
     }
 
     // deprecated·.other·미래 case만 default → "other".
@@ -1060,11 +1030,6 @@ final class HealthKitClient: @unchecked Sendable {
     private struct SleepSession {
         var start: Date
         var end: Date
-        var awakeMin: Int = 0
-        var lightMin: Int = 0
-        var deepMin: Int = 0
-        var remMin: Int = 0
-        var stages: [SleepStageValue] = []
     }
 
     // MARK: - valueJson 직렬화용 Codable 구조체
@@ -1083,19 +1048,8 @@ final class HealthKitClient: @unchecked Sendable {
         let distanceDaily: Double?
     }
 
-    fileprivate struct SleepStageValue: Codable {
-        let stage: String
-        let startMs: Int64
-        let endMs: Int64
-    }
-
     fileprivate struct SleepValue: Codable {
         let durationMin: Int?
-        let awakeMin: Int?
-        let lightMin: Int?
-        let deepMin: Int?
-        let remMin: Int?
-        let stages: [SleepStageValue]?
     }
 
     /// iOS·Android 공통 필드만 유지. 시작~종료 시각은 HealthRecord.timestamp/endTimestamp(envelope).

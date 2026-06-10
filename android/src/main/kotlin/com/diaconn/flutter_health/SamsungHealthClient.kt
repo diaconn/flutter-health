@@ -10,7 +10,6 @@ import com.samsung.android.sdk.health.data.HealthDataStore
 import com.samsung.android.sdk.health.data.data.AggregateOperation
 import com.samsung.android.sdk.health.data.data.HealthDataPoint
 import com.samsung.android.sdk.health.data.data.entries.ExerciseSession
-import com.samsung.android.sdk.health.data.data.entries.SleepSession
 import com.samsung.android.sdk.health.data.permission.AccessType
 import com.samsung.android.sdk.health.data.permission.Permission
 import com.samsung.android.sdk.health.data.request.AggregateRequest
@@ -636,25 +635,9 @@ class SamsungHealthClient(private val context: Context) {
     private fun buildSleepRecord(point: HealthDataPoint): HealthRecord? {
         val startMs = point.startTime?.toEpochMilli() ?: return null
         val endMs = point.endTime?.toEpochMilli() ?: return null
-
-        val sessions: List<SleepSession> =
-            runCatching { point.getValue(DataType.SleepType.SESSIONS) }.getOrNull() ?: emptyList()
-        val allStages: List<SleepSession.SleepStage> = sessions.flatMap { it.stages ?: emptyList() }
-
         val durationMs = runCatching {
             point.getValue(DataType.SleepType.DURATION)?.toMillis()
         }.getOrNull() ?: (endMs - startMs)
-
-        fun stageDurationMin(type: DataType.SleepType.StageType): Int? =
-            allStages.filter { it.stage == type }
-                .sumOf { (it.endTime?.toEpochMilli() ?: 0L) - (it.startTime?.toEpochMilli() ?: 0L) }
-                .div(60000L).toInt().takeIf { it > 0 }
-
-        val stageValues = allStages.mapNotNull { stage ->
-            val sStart = stage.startTime?.toEpochMilli() ?: return@mapNotNull null
-            val sEnd = stage.endTime?.toEpochMilli() ?: return@mapNotNull null
-            SleepStageValue(stage = mapSleepStage(stage.stage), startMs = sStart, endMs = sEnd)
-        }
 
         return HealthRecord(
             dataType = DATA_TYPE_SLEEP,
@@ -663,12 +646,7 @@ class SamsungHealthClient(private val context: Context) {
             tzOffset = currentTzOffset(),
             source = SOURCE,
             valueJson = json.encodeToString(SleepValue(
-                durationMin = (durationMs / 60000L).toInt().takeIf { it > 0 },
-                awakeMin = stageDurationMin(DataType.SleepType.StageType.AWAKE),
-                lightMin = stageDurationMin(DataType.SleepType.StageType.LIGHT),
-                deepMin = stageDurationMin(DataType.SleepType.StageType.DEEP),
-                remMin = stageDurationMin(DataType.SleepType.StageType.REM),
-                stages = stageValues.takeIf { it.isNotEmpty() }
+                durationMin = (durationMs / 60000L).toInt().takeIf { it > 0 }
             )),
             createdAt = System.currentTimeMillis(),
         )
@@ -711,14 +689,6 @@ class SamsungHealthClient(private val context: Context) {
         )
     }
 
-    private fun mapSleepStage(stage: DataType.SleepType.StageType): String = when (stage) {
-        DataType.SleepType.StageType.AWAKE -> "awake"
-        DataType.SleepType.StageType.LIGHT -> "light"
-        DataType.SleepType.StageType.DEEP -> "deep"
-        DataType.SleepType.StageType.REM -> "rem"
-        else -> "light"
-    }
-
     // PredefinedExerciseType(113종) → enum 이름 소문자 그대로 통과(TABLE_TENNIS→"table_tennis", 신규 자동 대응).
     private fun mapExerciseType(type: DataType.ExerciseType.PredefinedExerciseType): String = when (type) {
         DataType.ExerciseType.PredefinedExerciseType.UNDEFINED,
@@ -748,16 +718,8 @@ class SamsungHealthClient(private val context: Context) {
     )
 
     @Serializable
-    private data class SleepStageValue(val stage: String, val startMs: Long, val endMs: Long)
-
-    @Serializable
     private data class SleepValue(
-        val durationMin: Int?,
-        val awakeMin: Int?,
-        val lightMin: Int?,
-        val deepMin: Int?,
-        val remMin: Int?,
-        val stages: List<SleepStageValue>?
+        val durationMin: Int?
     )
 
     @Serializable
