@@ -311,18 +311,21 @@ final class HealthKitClient: @unchecked Sendable {
             predicates: [.quantitySample(type: qt, predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
-        // .bodyMass 와 .bodyFatPercentage 는 별개 샘플 → 독립 쿼리 2건을 동시 실행(직렬 대기 방지) 후 startDate 로 매칭.
+        // .bodyMass·.bodyMassIndex·.bodyFatPercentage 는 별개 샘플 → 독립 쿼리 3건을 동시 실행(직렬 대기 방지) 후 측정일(로컬)로 매칭.
         async let samplesResult = descriptor.result(for: store)
-        async let bodyFatTask = fetchBodyFatPercentByStart(since: since, to: to)
+        async let bmiTask = fetchQuantityByDay(.bodyMassIndex, unit: .count(), since: since, to: to)
+        async let bodyFatTask = fetchQuantityByDay(.bodyFatPercentage, unit: .percent(), since: since, to: to, scale: 100)
         guard let samples = try? await samplesResult else { return [] }
-        let bodyFatByStart = await bodyFatTask
+        let bmiByDay = await bmiTask
+        let bodyFatByDay = await bodyFatTask
         let tz = currentTzOffset()
         let now = toMs(Date())
+        let cal = Calendar.current
         return samples.compactMap { sample in
             let kg = sample.quantity.doubleValue(for: weightUnit)
             guard kg > 0 else { return nil }
-            // BMI 는 .bodyMass 에 미포함이라 nil 유지. bodyFat 은 위에서 매칭한 %(0~100) 값.
-            let value = WeightValue(weight: kg, bmi: nil, bodyFat: bodyFatByStart[sample.startDate])
+            let day = cal.startOfDay(for: sample.startDate)
+            let value = WeightValue(weight: kg, bmi: bmiByDay[day], bodyFat: bodyFatByDay[day])
             return HealthRecord(
                 dataType: Self.dataTypeWeight,
                 timestamp: toMs(sample.startDate),
@@ -335,19 +338,20 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// `.bodyFatPercentage` 샘플을 startDate→%(0~100) 맵으로 반환. HealthKit raw 분율(0~1) ×100.
-    private func fetchBodyFatPercentByStart(since: Date, to: Date) async -> [Date: Double] {
-        guard let qt = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage) else { return [:] }
+    /// body composition 보조 측정(BMI·체지방% 등)을 "측정일(로컬) → 값" 맵으로 반환해 weight 샘플에 매칭한다.
+    private func fetchQuantityByDay(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, since: Date, to: Date, scale: Double = 1) async -> [Date: Double] {
+        guard let qt = HKQuantityType.quantityType(forIdentifier: identifier) else { return [:] }
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate)]
         )
         guard let samples = try? await descriptor.result(for: store) else { return [:] }
+        let cal = Calendar.current
         var out: [Date: Double] = [:]
         for s in samples {
-            let pct = s.quantity.doubleValue(for: HKUnit.percent()) * 100   // 분율(0~1) → %
-            if pct > 0 { out[s.startDate] = pct }
+            let v = s.quantity.doubleValue(for: unit) * scale
+            if v > 0 { out[cal.startOfDay(for: s.startDate)] = v }   // 같은 날 여러 건이면 정렬상 뒤(최신)가 덮어씀
         }
         return out
     }
@@ -747,6 +751,7 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .bodyMass)!,
         HKObjectType.quantityType(forIdentifier: .height)!,
         HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)!,
+        HKObjectType.quantityType(forIdentifier: .bodyMassIndex)!,
         HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
         HKObjectType.workoutType(),
         // 혈당/혈압/수분
