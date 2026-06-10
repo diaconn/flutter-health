@@ -1,15 +1,16 @@
+/// 5분(구간) 지표 + 당일 누적. `*Interval`=조회 구간([from,to]) 값, `*Daily`=당일 자정부터 누적.
 class MetricValue {
-  final int? heartRateAvg;
-  final int? heartRateMin;
-  final int? heartRateMax;
-  final int? stepsInterval;
-  final int? stepsDaily;
-  final double? caloriesInterval;
-  final double? caloriesDaily;
-  final double? caloriesActiveInterval;
-  final double? caloriesActiveDaily;
-  final double? distanceInterval;
-  final double? distanceDaily;
+  final int? heartRateAvg; // 구간 평균 심박수 (bpm)
+  final int? heartRateMin; // 구간 최저 심박수 (bpm)
+  final int? heartRateMax; // 구간 최고 심박수 (bpm)
+  final int? stepsInterval; // 구간 걸음수
+  final int? stepsDaily; // 당일 누적 걸음수
+  final double? caloriesInterval; // 구간 총 소비 칼로리 (활동+기초대사, kcal) — 음식 섭취 아님
+  final double? caloriesDaily; // 당일 누적 총 소비 칼로리 (활동+기초대사, kcal)
+  final double? caloriesActiveInterval; // 구간 활동 소비 칼로리 (기초대사 제외, kcal)
+  final double? caloriesActiveDaily; // 당일 누적 활동 소비 칼로리 (기초대사 제외, kcal)
+  final double? distanceInterval; // 구간 이동 거리 (m)
+  final double? distanceDaily; // 당일 누적 이동 거리 (m)
 
   const MetricValue({
     this.heartRateAvg,
