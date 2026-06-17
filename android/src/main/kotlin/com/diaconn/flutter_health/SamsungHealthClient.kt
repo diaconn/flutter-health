@@ -8,6 +8,7 @@ import com.diaconn.flutter_health.models.HealthRecord
 import com.samsung.android.sdk.health.data.HealthDataService
 import com.samsung.android.sdk.health.data.HealthDataStore
 import com.samsung.android.sdk.health.data.data.AggregateOperation
+import com.samsung.android.sdk.health.data.data.AggregatedData
 import com.samsung.android.sdk.health.data.data.HealthDataPoint
 import com.samsung.android.sdk.health.data.data.entries.ExerciseSession
 import com.samsung.android.sdk.health.data.permission.AccessType
@@ -18,6 +19,8 @@ import com.samsung.android.sdk.health.data.request.DataTypes
 import com.samsung.android.sdk.health.data.request.InstantTimeFilter
 import com.samsung.android.sdk.health.data.request.LocalDateFilter
 import com.samsung.android.sdk.health.data.request.LocalTimeFilter
+import com.samsung.android.sdk.health.data.request.LocalTimeGroup
+import com.samsung.android.sdk.health.data.request.LocalTimeGroupUnit
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
@@ -74,62 +77,113 @@ class SamsungHealthClient(private val context: Context) {
     }
 
     /**
-     * [from]~[to] 구간의 건강 지표를 집계하여 "metric" HealthRecord를 반환한다.
-     * 모든 데이터가 없으면 null 반환.
+     * 심박수를 **벽시계 10분 격자 버킷**별 평균/최소/최대(bpm)로 반환(heart_rate). 완료된(닫힌) 칸만.
+     * steps/distance/calories 와 달리 그룹 집계로 avg/min/max 를 한 번에 못 받아, raw HEART_RATE 포인트를 격자로 직접 묶는다.
      */
-    suspend fun queryMetric(from: Long, to: Long): HealthRecord? = coroutineScope {
-        val s = store ?: return@coroutineScope null
+    suspend fun queryHeartRate(since: Long, to: Long): List<HealthRecord> {
+        val s = store ?: return emptyList()
+        return runCatching {
+            // 격자 경계로 내림(epoch 내림 = 벽시계 10분 정렬; KST 등 10분배수 offset).
+            val gridStart = (since / BUCKET_MS) * BUCKET_MS
+            if (gridStart >= to) return@runCatching emptyList<HealthRecord>()
+            val filter = InstantTimeFilter.of(Instant.ofEpochMilli(gridStart), Instant.ofEpochMilli(to))
+            val request = DataTypes.HEART_RATE.readDataRequestBuilder.setInstantTimeFilter(filter).build()
+            // 측정 시각 기준 10분 격자 버킷으로 포인트의 HEART_RATE 값을 모은다.
+            val byBucket = HashMap<Long, MutableList<Int>>()
+            s.readData(request).dataList.forEach { point ->
+                val v = point.getValueOrDefault(DataType.HeartRateType.HEART_RATE, 0f)
+                if (v <= 0f) return@forEach
+                val tMs = point.startTime?.toEpochMilli() ?: return@forEach
+                val bucketStart = (tMs / BUCKET_MS) * BUCKET_MS
+                byBucket.getOrPut(bucketStart) { mutableListOf() }.add(v.toInt())
+            }
+            val tz = currentTzOffset()
+            val now = System.currentTimeMillis()
+            byBucket.entries.mapNotNull { (bucketStart, values) ->
+                val bucketEnd = bucketStart + BUCKET_MS
+                if (bucketEnd > to || values.isEmpty()) return@mapNotNull null // 완료된 칸만
+                HealthRecord(
+                    dataType = DATA_TYPE_HEART_RATE,
+                    timestamp = bucketStart,
+                    endTimestamp = bucketEnd,
+                    tzOffset = tz,
+                    source = SOURCE,
+                    valueJson = json.encodeToString(HeartRateValue(
+                        avg = (values.sum() / values.size).takeIf { it > 0 },
+                        min = values.min().takeIf { it > 0 },
+                        max = values.max().takeIf { it > 0 }
+                    )),
+                    createdAt = now,
+                )
+            }.sortedByDescending { it.timestamp }
+        }.onFailure { Log.e(TAG, "심박수 격자 버킷 조회 실패", it) }.getOrDefault(emptyList())
+    }
+
+    /**
+     * 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환한다. metric 에서 분리된 독립 타입.
+     * Samsung 그룹 집계(LocalTimeGroup MINUTELY×10)로 한 번에 전 버킷을 받고, **완료된(닫힌) 칸만** 내보낸다.
+     */
+    suspend fun querySteps(since: Long, to: Long): List<HealthRecord> {
+        val s = store ?: return emptyList()
+        val tz = currentTzOffset()
+        val now = System.currentTimeMillis()
+        return aggregateGrid(s, DataType.StepsType.TOTAL, since, to, "걸음 구간").mapNotNull { d ->
+            val count = d.getValueOrDefault(0L).toInt().takeIf { it > 0 } ?: return@mapNotNull null
+            val startMs = d.startTime.toEpochMilli()
+            HealthRecord(DATA_TYPE_STEPS_INTERVAL, startMs, startMs + BUCKET_MS, tz, SOURCE,
+                json.encodeToString(StepsIntervalValue(count)), now)
+        }.sortedByDescending { it.timestamp }
+    }
+
+    /**
+     * 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환한다. metric 에서 분리된 독립 타입.
+     */
+    suspend fun queryDistance(since: Long, to: Long): List<HealthRecord> {
+        val s = store ?: return emptyList()
+        val tz = currentTzOffset()
+        val now = System.currentTimeMillis()
+        return aggregateGrid(s, DataType.ActivitySummaryType.TOTAL_DISTANCE, since, to, "이동 거리").mapNotNull { d ->
+            val meters = d.getValueOrDefault(0f).toDouble().takeIf { it > 0.0 } ?: return@mapNotNull null
+            val startMs = d.startTime.toEpochMilli()
+            HealthRecord(DATA_TYPE_DISTANCE_INTERVAL, startMs, startMs + BUCKET_MS, tz, SOURCE,
+                json.encodeToString(DistanceIntervalValue(meters)), now)
+        }.sortedByDescending { it.timestamp }
+    }
+
+    /**
+     * 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total=활동+기초대사·active=활동, kcal)으로 반환한다.
+     * metric 에서 분리된 독립 타입. total/active 격자를 각각 받아 버킷 시작 기준으로 병합한다.
+     */
+    suspend fun queryCalories(since: Long, to: Long): List<HealthRecord> = coroutineScope {
+        val s = store ?: return@coroutineScope emptyList()
+        val totalD = async { aggregateGrid(s, DataType.ActivitySummaryType.TOTAL_CALORIES_BURNED, since, to, "칼로리") }
+        val activeD = async { aggregateGrid(s, DataType.ActivitySummaryType.TOTAL_ACTIVE_CALORIES_BURNED, since, to, "활동 칼로리") }
+        val activeByStart = activeD.await().associate { it.startTime.toEpochMilli() to it.getValueOrDefault(0f).toDouble() }
+        val tz = currentTzOffset()
+        val now = System.currentTimeMillis()
+        totalD.await().mapNotNull { d ->
+            val total = d.getValueOrDefault(0f).toDouble().takeIf { it > 0.0 } ?: return@mapNotNull null
+            val startMs = d.startTime.toEpochMilli()
+            val active = activeByStart[startMs]?.takeIf { it > 0.0 }
+            HealthRecord(DATA_TYPE_CALORIES_INTERVAL, startMs, startMs + BUCKET_MS, tz, SOURCE,
+                json.encodeToString(CaloriesIntervalValue(total = total, active = active)), now)
+        }.sortedByDescending { it.timestamp }
+    }
+
+    /**
+     * 당일 누적 걸음 수(steps_daily) 1건 — [date] 가 가리키는 날 자정~수집 시점 누적. metric 에서 분리된 독립 타입.
+     */
+    suspend fun queryStepsDaily(date: LocalDate): List<HealthRecord> {
+        val s = store ?: return emptyList()
         val zone = ZoneId.systemDefault()
-        val localFilter = LocalTimeFilter.of(from.toLocalDateTime(), to.toLocalDateTime())
-        val instantFilter = InstantTimeFilter.of(Instant.ofEpochMilli(from), Instant.ofEpochMilli(to))
-        val dayStartMs = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
-        val dayFilter = LocalTimeFilter.of(dayStartMs.toLocalDateTime(), to.toLocalDateTime())
-
-        val hrD = async { readHeartRateStats(s, instantFilter) }
-        val siD = async { aggregateSteps(s, localFilter) }
-        val sdD = async { aggregateSteps(s, dayFilter) }
-        val ciD = async { aggregateCalories(s, localFilter) }
-        val cdD = async { aggregateCalories(s, dayFilter) }
-        val caiD = async { aggregateActiveCalories(s, localFilter) }
-        val cadD = async { aggregateActiveCalories(s, dayFilter) }
-        val diD = async { aggregateDistance(s, localFilter) }
-        val ddD = async { aggregateDistance(s, dayFilter) }
-
-        val hrStats = hrD.await()
-        val stepsInterval = siD.await()
-        val stepsDaily = sdD.await()
-        val caloriesInterval = ciD.await()
-        val caloriesDaily = cdD.await()
-        val caloriesActiveInterval = caiD.await()
-        val caloriesActiveDaily = cadD.await()
-        val distanceInterval = diD.await()
-        val distanceDaily = ddD.await()
-
-        if (hrStats.avg == null && stepsInterval == null && caloriesInterval == null && distanceInterval == null) {
-            return@coroutineScope null
-        }
-
-        HealthRecord(
-            dataType = DATA_TYPE_METRIC,
-            timestamp = from,
-            endTimestamp = to,
-            tzOffset = currentTzOffset(),
-            source = SOURCE,
-            valueJson = json.encodeToString(MetricValue(
-                heartRateAvg = hrStats.avg,
-                heartRateMin = hrStats.min,
-                heartRateMax = hrStats.max,
-                stepsInterval = stepsInterval,
-                stepsDaily = stepsDaily,
-                caloriesInterval = caloriesInterval,
-                caloriesDaily = caloriesDaily,
-                caloriesActiveInterval = caloriesActiveInterval,
-                caloriesActiveDaily = caloriesActiveDaily,
-                distanceInterval = distanceInterval,
-                distanceDaily = distanceDaily
-            )),
-            createdAt = System.currentTimeMillis(),
-        )
+        val dayStartMs = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        val nowMs = System.currentTimeMillis()
+        val endMs = minOf(date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli(), nowMs)
+        if (endMs <= dayStartMs) return emptyList()
+        val filter = LocalTimeFilter.of(dayStartMs.toLocalDateTime(), endMs.toLocalDateTime())
+        val count = aggregateSteps(s, filter)?.takeIf { it > 0 } ?: return emptyList()
+        return listOf(HealthRecord(DATA_TYPE_STEPS_DAILY, dayStartMs, nowMs, currentTzOffset(), SOURCE,
+            json.encodeToString(StepsDailyValue(count)), nowMs))
     }
 
     /** [since]~[to] 구간에 종료된 수면 세션 목록을 반환한다. */
@@ -343,6 +397,7 @@ class SamsungHealthClient(private val context: Context) {
                             basalMetabolicRate = basalMetabolicRate
                         )),
                         createdAt = now,
+                        uid = point.uid,
                     )
                 }
         }.onFailure { Log.e(TAG, "체중 조회 실패", it) }.getOrDefault(emptyList())
@@ -382,6 +437,7 @@ class SamsungHealthClient(private val context: Context) {
                     series = series
                 )),
                 createdAt = now,
+                uid = point.uid,
             )
         }
 
@@ -411,6 +467,7 @@ class SamsungHealthClient(private val context: Context) {
                     medicationTaken = medication
                 )),
                 createdAt = now,
+                uid = point.uid,
             )
         }
 
@@ -462,6 +519,7 @@ class SamsungHealthClient(private val context: Context) {
                     vitaminA = vitaminA, vitaminC = vitaminC, calcium = calcium, iron = iron
                 )),
                 createdAt = now,
+                uid = point.uid,
             )
         }
 
@@ -478,12 +536,12 @@ class SamsungHealthClient(private val context: Context) {
             val tz = currentTzOffset()
             val now = System.currentTimeMillis()
 
-            data class WaterRaw(val startMs: Long, val endMs: Long, val amount: Double)
+            data class WaterRaw(val startMs: Long, val endMs: Long, val amount: Double, val uid: String?)
             val raws = s.readData(request).dataList.mapNotNull { point ->
                 val amount = runCatching { point.getValue(DataType.WaterIntakeType.AMOUNT) }.getOrNull()
                 if (amount == null || amount <= 0f) return@mapNotNull null
                 val startMs = point.startTime?.toEpochMilli() ?: return@mapNotNull null
-                WaterRaw(startMs, point.endTime?.toEpochMilli() ?: startMs, amount.toDouble())
+                WaterRaw(startMs, point.endTime?.toEpochMilli() ?: startMs, amount.toDouble(), point.uid)
             }
 
             // 로컬 달력일별로 묶어 시각 오름차순 prefix-sum → cumulativeToDate. 표시용으로 다시 최신순 정렬.
@@ -503,6 +561,7 @@ class SamsungHealthClient(private val context: Context) {
                                 cumulativeToDate = running,
                             )),
                             createdAt = now,
+                            uid = r.uid,
                         )
                     }
                 }
@@ -532,6 +591,7 @@ class SamsungHealthClient(private val context: Context) {
                     // Samsung UserProfile.HEIGHT 는 cm (실기기 검증 2026-06-04, iOS·스키마와 통일).
                     valueJson = json.encodeToString(HeightValue(value = height.toDouble())),
                     createdAt = now,
+                    // UserProfile 은 UserDataPoint(레코드 uid 없는 프로필 값) → uid 미설정(null).
                 )
             }
         }.onFailure { Log.e(TAG, "키(프로필) 조회 실패", it) }.getOrDefault(emptyList())
@@ -574,6 +634,31 @@ class SamsungHealthClient(private val context: Context) {
             val request = DataType.StepsType.TOTAL.requestBuilder.setLocalTimeFilter(filter).build()
             s.aggregateData(request).dataList.firstOrNull()?.value?.toInt()?.takeIf { it > 0 }
         }.onFailure { Log.e(TAG, "걸음수 집계 실패", it) }.getOrDefault(null)
+
+    /**
+     * since 를 BUCKET_MS 격자 경계로 내려 [그 경계, to] 를 LocalTimeGroup(MINUTELY×BUCKET_MIN) 으로 그룹 집계한다.
+     * **완료된(닫힌) 칸만**(start+BUCKET_MS <= to) 반환해 진행 중인 마지막 부분 칸을 제외한다.
+     * steps_interval·distance_interval·calories_interval 이 공유하는 격자 집계 헬퍼.
+     */
+    private suspend fun <T : Any> aggregateGrid(
+        s: HealthDataStore,
+        op: AggregateOperation<T, AggregateRequest.LocalTimeBuilder<T>>,
+        since: Long,
+        to: Long,
+        logTag: String
+    ): List<AggregatedData<T>> =
+        runCatching {
+            val gridStart = (since / BUCKET_MS) * BUCKET_MS
+            if (gridStart >= to) {
+                emptyList()
+            } else {
+                val filter = LocalTimeFilter.of(gridStart.toLocalDateTime(), to.toLocalDateTime())
+                val group = LocalTimeGroup.of(LocalTimeGroupUnit.MINUTELY, BUCKET_MIN)
+                val request = op.requestBuilder.setLocalTimeFilterWithGroup(filter, group).build()
+                s.aggregateData(request).dataList
+                    .filter { it.startTime.toEpochMilli() + BUCKET_MS <= to } // 완료된(닫힌) 칸만
+            }
+        }.onFailure { Log.e(TAG, "$logTag 격자 집계 실패", it) }.getOrDefault(emptyList())
 
     private suspend fun aggregateActivityFloat(
         s: HealthDataStore,
@@ -649,6 +734,7 @@ class SamsungHealthClient(private val context: Context) {
                 durationMin = (durationMs / 60000L).toInt().takeIf { it > 0 }
             )),
             createdAt = System.currentTimeMillis(),
+            uid = point.uid,
         )
     }
 
@@ -686,6 +772,7 @@ class SamsungHealthClient(private val context: Context) {
                 heartRateMin = session?.minHeartRate?.posOrNull()?.toInt(),
             )),
             createdAt = System.currentTimeMillis(),
+            uid = point.uid,
         )
     }
 
@@ -702,20 +789,29 @@ class SamsungHealthClient(private val context: Context) {
 
     // --- valueJson 직렬화용 내부 데이터 클래스 ---
 
+    /** 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate). */
     @Serializable
-    private data class MetricValue(
-        val heartRateAvg: Int?,
-        val heartRateMin: Int?,
-        val heartRateMax: Int?,
-        val stepsInterval: Int?,
-        val stepsDaily: Int?,
-        val caloriesInterval: Double?,
-        val caloriesDaily: Double?,
-        val caloriesActiveInterval: Double?,
-        val caloriesActiveDaily: Double?,
-        val distanceInterval: Double?,
-        val distanceDaily: Double?
+    private data class HeartRateValue(
+        val avg: Int?,
+        val min: Int?,
+        val max: Int?
     )
+
+    /** 걸음 10분 격자 버킷 값. metric 에서 분리된 독립 타입(steps_interval). */
+    @Serializable
+    private data class StepsIntervalValue(val count: Int)
+
+    /** 이동 거리 10분 격자 버킷 값(m). metric 에서 분리된 독립 타입(distance_interval). */
+    @Serializable
+    private data class DistanceIntervalValue(val distance: Double)
+
+    /** 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동. metric 에서 분리된 독립 타입(calories_interval). */
+    @Serializable
+    private data class CaloriesIntervalValue(val total: Double, val active: Double? = null)
+
+    /** 당일 누적 걸음 수. metric 에서 분리된 독립 타입(steps_daily). */
+    @Serializable
+    private data class StepsDailyValue(val count: Int)
 
     @Serializable
     private data class SleepValue(
@@ -830,7 +926,14 @@ class SamsungHealthClient(private val context: Context) {
     private data class HeightValue(val value: Double)
 
     companion object {
-        const val DATA_TYPE_METRIC = "metric"
+        // 격자 버킷 크기 (heart_rate·steps_interval·distance_interval·calories_interval 공통).
+        const val BUCKET_MIN = 10
+        const val BUCKET_MS = BUCKET_MIN * 60 * 1000L
+        const val DATA_TYPE_HEART_RATE = "heart_rate"
+        const val DATA_TYPE_STEPS_INTERVAL = "steps_interval"
+        const val DATA_TYPE_DISTANCE_INTERVAL = "distance_interval"
+        const val DATA_TYPE_CALORIES_INTERVAL = "calories_interval"
+        const val DATA_TYPE_STEPS_DAILY = "steps_daily"
         const val DATA_TYPE_SLEEP = "sleep"
         const val DATA_TYPE_EXERCISE = "exercise"
         const val DATA_TYPE_HOURLY_SUMMARY = "hourly_summary"

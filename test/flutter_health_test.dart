@@ -23,8 +23,23 @@ class MockFlutterHealthPlatform
   Future<bool> requestPermission() => Future.value(true);
 
   @override
-  Future<HealthRecord?> queryMetric(DateTime from, DateTime to) =>
-      Future.value(null);
+  Future<List<HealthRecord>> queryHeartRate(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> querySteps(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryDistance(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) =>
+      Future.value([]);
+
+  @override
+  Future<List<HealthRecord>> queryStepsDaily(DateTime date) => Future.value([]);
 
   @override
   Future<List<HealthRecord>> queryEndedSleepSessions(

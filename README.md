@@ -78,11 +78,11 @@ await health.connect();
 // 권한 요청
 await health.requestPermission();
 
-// 5분 구간 지표 조회
+// 10분 격자 버킷 지표 조회 (심박·걸음·거리·칼로리)
 final now = DateTime.now();
-final record = await health.queryMetric(now.subtract(Duration(minutes: 5)), now);
-if (record != null) {
-  print(record.valueJson);  // MetricValue JSON
+final beats = await health.queryHeartRate(now.subtract(Duration(minutes: 15)), now);
+for (final r in beats) {
+  print(r.valueJson);  // HeartRateValue JSON
 }
 ```
 
@@ -97,7 +97,11 @@ if (record != null) {
 | `disconnect()` | 연결 해제 |
 | `isPermissionGranted()` | 권한 부여 여부 확인 |
 | `requestPermission()` | 권한 요청 UI 표시 |
-| `queryMetric(from, to)` | 지정 구간 5분 지표(HR·걸음·칼로리·거리) |
+| `queryHeartRate(since, to)` | 심박수 — 벽시계 10분 격자 버킷(avg/min/max, bpm) 목록. 완료된(닫힌) 칸만 |
+| `querySteps(since, to)` | 걸음 수 — 벽시계 10분 격자 버킷(count) 합 목록. 완료된 칸만 |
+| `queryDistance(since, to)` | 이동 거리 — 벽시계 10분 격자 버킷(distance, m) 합 목록. 완료된 칸만 |
+| `queryCalories(since, to)` | 소비 칼로리 — 벽시계 10분 격자 버킷(total/active, kcal) 합 목록. 완료된 칸만 |
+| `queryStepsDaily(date)` | 당일 누적 걸음 수(count) 1건 — 자정~수집 시점 누적 |
 | `queryEndedSleepSessions(since, to)` | 구간 내 종료된 수면 세션 목록 |
 | `queryEndedExerciseSessions(since, to)` | 구간 내 종료된 운동 세션 목록 |
 | `queryHourlySummary(hourStart, hourEnd)` | 1시간 집계 (HR·걸음·칼로리·거리) |
@@ -114,7 +118,7 @@ if (record != null) {
 
 ```dart
 class HealthRecord {
-  final String dataType;    // "metric" | "sleep" | "exercise" | "hourly_summary" | "daily_summary" | "weight"
+  final String dataType;    // "heart_rate" | "steps_interval" | "distance_interval" | "calories_interval" | "steps_daily" | "sleep" | "exercise" | "hourly_summary" | "daily_summary" | "weight" ...
   final int timestamp;      // UTC epoch ms (구간 시작)
   final int endTimestamp;   // UTC epoch ms (구간 종료)
   final String tzOffset;    // "+09:00" 형식
@@ -127,8 +131,12 @@ class HealthRecord {
 `valueJson`을 타입드 모델로 파싱하는 편의 getter도 제공합니다.
 
 ```dart
-record.asMetric         // MetricValue?
-record.asSleep          // SleepValue?
+record.asHeartRate         // HeartRateValue?
+record.asStepsInterval     // StepsIntervalValue?
+record.asDistanceInterval  // DistanceIntervalValue?
+record.asCaloriesInterval  // CaloriesIntervalValue?
+record.asStepsDaily        // StepsDailyValue?
+record.asSleep             // SleepValue?
 record.asExercise       // ExerciseValue?
 record.asHourlySummary  // HourlySummaryValue?
 record.asDailySummary   // DailySummaryValue?
@@ -137,34 +145,43 @@ record.asWeight         // WeightValue?
 
 ---
 
-## 5분 루프 구현 가이드 (호스트 앱)
+## 10분 루프 구현 가이드 (호스트 앱)
 
 플러그인은 스케줄링을 하지 않습니다. 호스트 앱에서 아래 패턴으로 구현하세요.
+지표(심박·걸음·거리·칼로리)는 **벽시계 10분 격자 버킷**으로 들어오며, **완료된(닫힌) 칸만** 반환됩니다.
+같은 칸을 다시 받아도 서버 UNIQUE(member, data_type, start_dttm) + on conflict 가 흡수하므로 안전합니다.
 
 ```dart
 Timer? _loopTimer;
 
 void startHealthLoop() {
-  _collectMetric();   // 즉시 1회 수집
+  _collect();   // 즉시 1회 수집
 
-  // 다음 5분 벽시계 경계까지 대기 후 periodic 시작
+  // 다음 10분 벽시계 경계까지 대기 후 periodic 시작
   final now = DateTime.now();
-  final msInCycle = (now.minute % 5) * 60000 + now.second * 1000 + now.millisecond;
-  final msToNext  = 5 * 60000 - msInCycle;
+  final msInCycle = (now.minute % 10) * 60000 + now.second * 1000 + now.millisecond;
+  final msToNext  = 10 * 60000 - msInCycle;
 
   _loopTimer = Timer(Duration(milliseconds: msToNext), () {
-    _collectMetric();
-    _loopTimer = Timer.periodic(const Duration(minutes: 5), (_) => _collectMetric());
+    _collect();
+    _loopTimer = Timer.periodic(const Duration(minutes: 10), (_) => _collect());
   });
 }
 
-Future<void> _collectMetric() async {
+Future<void> _collect() async {
   final to   = DateTime.now();
-  final from = to.subtract(const Duration(minutes: 5));
-  final record = await health.queryMetric(from, to);
-  if (record != null) {
-    // 서버 전송 또는 로컬 DB 저장
-  }
+  // 직전 닫힌 10분 칸을 확실히 포함하도록 약간 넓게(재수집은 서버가 dedup).
+  final from = to.subtract(const Duration(minutes: 15));
+  // 5개는 독립 쿼리라 동시에 던진다.
+  final results = await Future.wait([
+    health.queryHeartRate(from, to),
+    health.querySteps(from, to),
+    health.queryDistance(from, to),
+    health.queryCalories(from, to),
+    health.queryStepsDaily(to), // 당일 누적 걸음
+  ]);
+  final records = results.expand((r) => r).toList();
+  // 서버 전송 또는 로컬 DB 저장
 }
 ```
 

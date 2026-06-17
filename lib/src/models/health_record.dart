@@ -1,6 +1,10 @@
 import 'dart:convert';
 
-import 'metric_value.dart';
+import 'heart_rate_value.dart';
+import 'steps_interval_value.dart';
+import 'distance_interval_value.dart';
+import 'calories_interval_value.dart';
+import 'steps_daily_value.dart';
 import 'sleep_value.dart';
 import 'exercise_value.dart';
 import 'hourly_summary_value.dart';
@@ -14,7 +18,11 @@ import 'step_segment_value.dart';
 import 'height_value.dart';
 
 class HealthRecord {
-  static const String typeMetric = 'metric';
+  static const String typeHeartRate = 'heart_rate';
+  static const String typeStepsInterval = 'steps_interval';
+  static const String typeDistanceInterval = 'distance_interval';
+  static const String typeCaloriesInterval = 'calories_interval';
+  static const String typeStepsDaily = 'steps_daily';
   static const String typeSleep = 'sleep';
   static const String typeExercise = 'exercise';
   static const String typeHourlySummary = 'hourly_summary';
@@ -24,6 +32,7 @@ class HealthRecord {
   static const String typeBloodPressure = 'blood_pressure';
   static const String typeNutrition = 'nutrition';
   static const String typeWaterIntake = 'water_intake';
+  // step_segment·medication·insulin_delivery 는 iOS 전용(Android Samsung SDK 미제공). 플랫폼은 타입 이름이 아니라 source(apple_health/samsung_health)로 구분한다.
   static const String typeStepSegment = 'step_segment';
   static const String typeHeight = 'height';
 
@@ -35,6 +44,10 @@ class HealthRecord {
   final String valueJson;
   final int createdAt;
 
+  /// 원본 레코드의 네이티브 고유 id (iOS=HKSample.uuid / Android=HealthDataPoint.uid).
+  /// 집계 버킷(heart_rate·steps_interval·distance_interval·calories_interval·steps_daily·요약)은 원본 레코드가 아니라 null.
+  final String? uid;
+
   const HealthRecord({
     required this.dataType,
     required this.timestamp,
@@ -43,6 +56,7 @@ class HealthRecord {
     required this.source,
     required this.valueJson,
     required this.createdAt,
+    this.uid,
   });
 
   factory HealthRecord.fromMap(Map<dynamic, dynamic> map) => HealthRecord(
@@ -53,11 +67,20 @@ class HealthRecord {
         source: map['source'] as String,
         valueJson: map['valueJson'] as String,
         createdAt: (map['createdAt'] as num).toInt(),
+        uid: map['uid'] as String?,
       );
 
   Map<String, dynamic> _decoded() => jsonDecode(valueJson) as Map<String, dynamic>;
 
-  MetricValue? get asMetric => dataType == typeMetric ? MetricValue.fromJson(_decoded()) : null;
+  HeartRateValue? get asHeartRate => dataType == typeHeartRate ? HeartRateValue.fromJson(_decoded()) : null;
+  StepsIntervalValue? get asStepsInterval =>
+      dataType == typeStepsInterval ? StepsIntervalValue.fromJson(_decoded()) : null;
+  DistanceIntervalValue? get asDistanceInterval =>
+      dataType == typeDistanceInterval ? DistanceIntervalValue.fromJson(_decoded()) : null;
+  CaloriesIntervalValue? get asCaloriesInterval =>
+      dataType == typeCaloriesInterval ? CaloriesIntervalValue.fromJson(_decoded()) : null;
+  StepsDailyValue? get asStepsDaily =>
+      dataType == typeStepsDaily ? StepsDailyValue.fromJson(_decoded()) : null;
   SleepValue? get asSleep => dataType == typeSleep ? SleepValue.fromJson(_decoded()) : null;
   ExerciseValue? get asExercise => dataType == typeExercise ? ExerciseValue.fromJson(_decoded()) : null;
   HourlySummaryValue? get asHourlySummary =>

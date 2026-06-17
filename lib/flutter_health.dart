@@ -1,5 +1,9 @@
 export 'src/models/health_record.dart';
-export 'src/models/metric_value.dart';
+export 'src/models/heart_rate_value.dart';
+export 'src/models/steps_interval_value.dart';
+export 'src/models/distance_interval_value.dart';
+export 'src/models/calories_interval_value.dart';
+export 'src/models/steps_daily_value.dart';
 export 'src/models/sleep_value.dart';
 export 'src/models/exercise_value.dart';
 export 'src/models/hourly_summary_value.dart';
@@ -35,10 +39,25 @@ class FlutterHealth {
   /// 삼성헬스 / HealthKit 권한 UI를 표시. 일부만 허용해도 true 반환.
   Future<bool> requestPermission() => FlutterHealthPlatform.instance.requestPermission();
 
-  /// [from]~[to] 구간의 5분 건강 지표 (metric) 레코드를 반환.
-  /// 데이터 없으면 null.
-  Future<HealthRecord?> queryMetric(DateTime from, DateTime to) =>
-      FlutterHealthPlatform.instance.queryMetric(from, to);
+  /// [since]~[to] 구간의 심박수를 **벽시계 10분 격자 버킷**별 집계(avg/min/max, bpm)로 반환(heart_rate). 완료된(닫힌) 칸만.
+  Future<List<HealthRecord>> queryHeartRate(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryHeartRate(since, to);
+
+  /// [since]~[to] 구간의 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환. 완료된 칸만.
+  Future<List<HealthRecord>> querySteps(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.querySteps(since, to);
+
+  /// [since]~[to] 구간의 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환. 완료된 칸만.
+  Future<List<HealthRecord>> queryDistance(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryDistance(since, to);
+
+  /// [since]~[to] 구간의 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total+active kcal)으로 반환. 완료된 칸만.
+  Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryCalories(since, to);
+
+  /// 당일 누적 걸음 수(steps_daily) 1건을 반환. [date] 가 가리키는 날의 자정~수집 시점 누적. 데이터 없으면 빈 리스트.
+  Future<List<HealthRecord>> queryStepsDaily(DateTime date) =>
+      FlutterHealthPlatform.instance.queryStepsDaily(date);
 
   /// [since]~[to] 구간에 종료된 수면 세션 목록을 반환.
   Future<List<HealthRecord>> queryEndedSleepSessions(DateTime since, DateTime to) =>

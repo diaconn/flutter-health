@@ -27,12 +27,31 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
       await methodChannel.invokeMethod<bool>('requestPermission') ?? false;
 
   @override
-  Future<HealthRecord?> queryMetric(DateTime from, DateTime to) async {
-    final result = await methodChannel.invokeMethod<Map>('queryMetric', {
-      'from': from.millisecondsSinceEpoch,
-      'to': to.millisecondsSinceEpoch,
-    });
-    return result == null ? null : HealthRecord.fromMap(result);
+  Future<List<HealthRecord>> queryHeartRate(DateTime since, DateTime to) =>
+      _queryList('queryHeartRate', since, to);
+
+  @override
+  Future<List<HealthRecord>> querySteps(DateTime since, DateTime to) =>
+      _queryList('querySteps', since, to);
+
+  @override
+  Future<List<HealthRecord>> queryDistance(DateTime since, DateTime to) =>
+      _queryList('queryDistance', since, to);
+
+  @override
+  Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) =>
+      _queryList('queryCalories', since, to);
+
+  @override
+  Future<List<HealthRecord>> queryStepsDaily(DateTime date) async {
+    final List? result;
+    try {
+      result = await methodChannel.invokeMethod<List>(
+          'queryStepsDaily', {'date': date.toIso8601String().substring(0, 10)});
+    } on MissingPluginException {
+      return const [];
+    }
+    return _toRecordsNewestFirst(result);
   }
 
   @override

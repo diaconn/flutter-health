@@ -74,15 +74,15 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     result.success(client.requestPermission(act))
                 }
             }
-            "queryMetric" -> {
-                val from = call.argument<Number>("from")?.toLong()
-                val to = call.argument<Number>("to")?.toLong()
-                if (from == null || to == null) {
-                    result.error("INVALID_ARGS", "from and to are required", null)
+            "queryStepsDaily" -> {
+                val isoDate = call.argument<String>("date")
+                val date = isoDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                if (date == null) {
+                    result.error("INVALID_ARGS", "date must be ISO local date (yyyy-MM-dd)", null)
                     return
                 }
                 scope.launch {
-                    runCatching { client.queryMetric(from, to)?.toMap() }
+                    runCatching { client.queryStepsDaily(date).map { it.toMap() } }
                         .onSuccess { result.success(it) }
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }
@@ -156,6 +156,10 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }
             }
+            "queryHeartRate",
+            "querySteps",
+            "queryDistance",
+            "queryCalories",
             "queryBloodGlucose",
             "queryBloodPressure",
             "queryNutrition",
@@ -170,6 +174,10 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 scope.launch {
                     runCatching {
                         val list = when (call.method) {
+                            "queryHeartRate" -> client.queryHeartRate(since, to)
+                            "querySteps" -> client.querySteps(since, to)
+                            "queryDistance" -> client.queryDistance(since, to)
+                            "queryCalories" -> client.queryCalories(since, to)
                             "queryBloodGlucose" -> client.queryBloodGlucose(since, to)
                             "queryBloodPressure" -> client.queryBloodPressure(since, to)
                             "queryNutrition" -> client.queryNutrition(since, to)

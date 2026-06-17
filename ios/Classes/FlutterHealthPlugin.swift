@@ -41,24 +41,22 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-        case "queryMetric":
-            guard let args = call.arguments as? [String: Any],
-                  let fromMs = args["from"] as? Int,
-                  let toMs = args["to"] as? Int else {
-                result(FlutterError(code: "INVALID_ARGS", message: "from/to required", details: nil))
+        case "queryStepsDaily":
+            guard let args    = call.arguments as? [String: Any],
+                  let dateStr = args["date"] as? String else {
+                result(FlutterError(code: "INVALID_ARGS", message: "date required", details: nil))
                 return
             }
-            let from = Date(timeIntervalSince1970: Double(fromMs) / 1000.0)
-            let to   = Date(timeIntervalSince1970: Double(toMs)   / 1000.0)
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.timeZone = TimeZone.current
+            guard let date = formatter.date(from: dateStr) else {
+                result(FlutterError(code: "INVALID_ARGS", message: "date format must be yyyy-MM-dd", details: nil))
+                return
+            }
             Task {
-                do {
-                    let record = try await client.queryMetric(from: from, to: to)
-                    DispatchQueue.main.async { result(record?.toDictionary()) }
-                } catch {
-                    DispatchQueue.main.async {
-                        result(FlutterError(code: "HK_ERROR", message: error.localizedDescription, details: nil))
-                    }
-                }
+                let records = await client.queryStepsDaily(date: date)
+                DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
             }
 
         case "queryEndedSleepSessions":
@@ -159,7 +157,8 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-        case "queryBloodGlucose", "queryBloodPressure", "queryInsulinDelivery", "queryNutrition", "queryWaterIntake",
+        case "queryHeartRate", "querySteps", "queryDistance", "queryCalories",
+             "queryBloodGlucose", "queryBloodPressure", "queryInsulinDelivery", "queryNutrition", "queryWaterIntake",
              "queryStepSegments", "queryHeight",
              "queryMedication":
             guard let args = call.arguments as? [String: Any],
@@ -174,6 +173,10 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
             Task {
                 let records: [HealthRecord]
                 switch method {
+                case "queryHeartRate":            records = await client.queryHeartRate(since: since, to: to)
+                case "querySteps":                records = await client.querySteps(since: since, to: to)
+                case "queryDistance":             records = await client.queryDistance(since: since, to: to)
+                case "queryCalories":             records = await client.queryCalories(since: since, to: to)
                 case "queryBloodGlucose":         records = await client.queryBloodGlucose(since: since, to: to)
                 case "queryBloodPressure":        records = await client.queryBloodPressure(since: since, to: to)
                 case "queryInsulinDelivery":      records = await client.queryInsulinDelivery(since: since, to: to)

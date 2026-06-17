@@ -39,67 +39,107 @@ final class HealthKitClient: @unchecked Sendable {
         return true
     }
 
-    func queryMetric(from: Date, to: Date) async -> HealthRecord? {
-        let dayStart = Calendar.current.startOfDay(for: to)
-        let dayInterval = DateComponents(day: 1)
-
-        async let hrStats = queryHeartRateStats(from: from, to: to)
-        async let stepsInterval = querySumQuantity(.stepCount, unit: .count(), from: from, to: to)
-        // *Daily(오늘 누적)는 자정 기준 버킷 합(querySumBucketed)으로 over-count 를 막는다.
-        // *Interval(임의 구간)은 버킷이 안 맞아 querySumQuantity 를 그대로 쓴다.
-        async let stepsDaily = querySumBucketed(.stepCount, unit: .count(), bucketStart: dayStart, interval: dayInterval)
-        async let activeInterval = querySumQuantity(.activeEnergyBurned, unit: .kilocalorie(), from: from, to: to)
-        async let activeDaily = querySumBucketed(.activeEnergyBurned, unit: .kilocalorie(), bucketStart: dayStart, interval: dayInterval)
-        async let basalInterval = querySumQuantity(.basalEnergyBurned, unit: .kilocalorie(), from: from, to: to)
-        async let basalDaily = querySumBucketed(.basalEnergyBurned, unit: .kilocalorie(), bucketStart: dayStart, interval: dayInterval)
-        async let distanceInterval = querySumQuantity(.distanceWalkingRunning, unit: .meter(), from: from, to: to)
-        async let distanceDaily = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: dayStart, interval: dayInterval)
-
-        // 한 번에 await 하면 타입체커가 못 풀어 개별 await.
-        let hr = await hrStats
-        let si = await stepsInterval
-        let sd = await stepsDaily
-        let ai = await activeInterval
-        let ad = await activeDaily
-        let bi = await basalInterval
-        let bd = await basalDaily
-        let di = await distanceInterval
-        let dd = await distanceDaily
-
-        // total = basal + active (둘 중 하나만 있으면 그것만, 둘 다 nil 이면 nil)
-        func sumOptional(_ a: Double?, _ b: Double?) -> Double? {
-            if a == nil && b == nil { return nil }
-            return (a ?? 0) + (b ?? 0)
+    /// since 를 격자 경계로 내려 완료된(닫힌, endDate<=to) 10분 버킷만 (start,end,stats) 로 반환. 진행 중 칸은 제외(부분 집계 방지).
+    /// heart(avg/min/max)·steps·distance·calories 가 공유 — 호출처가 stats 에서 sum/avg 를 꺼낸다.
+    private func queryGridBuckets(_ identifier: HKQuantityTypeIdentifier, options: HKStatisticsOptions, since: Date, to: Date) async -> [(start: Date, end: Date, stats: HKStatistics)] {
+        guard let qt = HKQuantityType.quantityType(forIdentifier: identifier) else { return [] }
+        let secs = Double(Self.bucketMinutes * 60)
+        // 격자 경계로 내림 → 격자 앵커 겸 predicate 시작(버킷 전체 구간을 집계, 부분 집계 방지).
+        let gridStart = Date(timeIntervalSince1970: floor(since.timeIntervalSince1970 / secs) * secs)
+        guard gridStart < to else { return [] }
+        // .strictStartDate 는 경계 가로지른 샘플을 누락 → 기본 overlap 으로 Apple 건강 UI 와 일치.
+        let predicate = HKQuery.predicateForSamples(withStart: gridStart, end: to, options: [])
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: qt,
+                quantitySamplePredicate: predicate,
+                options: options,
+                anchorDate: gridStart,
+                intervalComponents: DateComponents(minute: Self.bucketMinutes)
+            )
+            query.initialResultsHandler = { _, collection, _ in
+                var out: [(start: Date, end: Date, stats: HKStatistics)] = []
+                collection?.enumerateStatistics(from: gridStart, to: to) { stats, _ in
+                    guard stats.endDate <= to else { return } // 완료된 칸만
+                    out.append((start: stats.startDate, end: stats.endDate, stats: stats))
+                }
+                continuation.resume(returning: out)
+            }
+            store.execute(query)
         }
-        let totalInterval = sumOptional(ai, bi)
-        let totalDaily = sumOptional(ad, bd)
+    }
 
-        if hr.avg == nil && si == nil && ai == nil && bi == nil && di == nil {
-            return nil
+    /// 심박수를 **벽시계 10분 격자 버킷**(예: 09:00~09:10)별 평균/최소/최대(bpm)로 반환. metric 에서 분리된 독립 타입(heart_rate).
+    func queryHeartRate(since: Date, to: Date) async -> [HealthRecord] {
+        let unit = HKUnit(from: "count/min")
+        let buckets = await queryGridBuckets(.heartRate, options: [.discreteAverage, .discreteMin, .discreteMax], since: since, to: to)
+        let tz = currentTzOffset()
+        let createdAt = toMs(Date())
+        return buckets.compactMap { b in
+            func intOf(_ q: HKQuantity?) -> Int? {
+                guard let d = q?.doubleValue(for: unit), d > 0 else { return nil }
+                return Int(d)
+            }
+            guard let avg = intOf(b.stats.averageQuantity()) else { return nil } // 그 칸에 심박 샘플 없으면 스킵
+            let value = HeartRateValue(avg: avg, min: intOf(b.stats.minimumQuantity()), max: intOf(b.stats.maximumQuantity()))
+            return HealthRecord(dataType: Self.dataTypeHeartRate, timestamp: toMs(b.start), endTimestamp: toMs(b.end), tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
         }
+    }
 
-        let value = MetricValue(
-            heartRateAvg: hr.avg,
-            heartRateMin: hr.min,
-            heartRateMax: hr.max,
-            stepsInterval: si.map { Int($0) },
-            stepsDaily: sd.map { Int($0) },
-            caloriesInterval: totalInterval,
-            caloriesDaily: totalDaily,
-            caloriesActiveInterval: ai,
-            caloriesActiveDaily: ad,
-            distanceInterval: di,
-            distanceDaily: dd
-        )
-        return HealthRecord(
-            dataType: Self.dataTypeMetric,
-            timestamp: toMs(from),
-            endTimestamp: toMs(to),
-            tzOffset: currentTzOffset(),
-            source: Self.source,
-            valueJson: encodeToJson(value),
-            createdAt: toMs(Date())
-        )
+    /// 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환. metric 에서 분리된 독립 타입.
+    func querySteps(since: Date, to: Date) async -> [HealthRecord] {
+        let buckets = await queryGridBuckets(.stepCount, options: .cumulativeSum, since: since, to: to)
+        let tz = currentTzOffset()
+        let createdAt = toMs(Date())
+        return buckets.compactMap { b in
+            guard let c = b.stats.sumQuantity()?.doubleValue(for: .count()), c > 0 else { return nil }
+            let value = StepsIntervalValue(count: Int(c))
+            return HealthRecord(dataType: Self.dataTypeStepsInterval, timestamp: toMs(b.start), endTimestamp: toMs(b.end), tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
+        }
+    }
+
+    /// 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환. metric 에서 분리된 독립 타입.
+    func queryDistance(since: Date, to: Date) async -> [HealthRecord] {
+        let buckets = await queryGridBuckets(.distanceWalkingRunning, options: .cumulativeSum, since: since, to: to)
+        let tz = currentTzOffset()
+        let createdAt = toMs(Date())
+        return buckets.compactMap { b in
+            guard let m = b.stats.sumQuantity()?.doubleValue(for: .meter()), m > 0 else { return nil }
+            let value = DistanceIntervalValue(distance: m)
+            return HealthRecord(dataType: Self.dataTypeDistanceInterval, timestamp: toMs(b.start), endTimestamp: toMs(b.end), tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
+        }
+    }
+
+    /// 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total=활동+기초대사·active=활동, kcal)으로 반환.
+    /// metric 에서 분리된 독립 타입. active·basal 격자를 각각 구해 버킷 시작 기준으로 병합한다.
+    func queryCalories(since: Date, to: Date) async -> [HealthRecord] {
+        async let activeB = queryGridBuckets(.activeEnergyBurned, options: .cumulativeSum, since: since, to: to)
+        async let basalB = queryGridBuckets(.basalEnergyBurned, options: .cumulativeSum, since: since, to: to)
+        // 버킷 시작(ms) → kcal 로 인덱싱. total = active + basal, 한쪽만 있는 칸도 살리려 키 합집합으로 순회.
+        func kcalByStart(_ buckets: [(start: Date, end: Date, stats: HKStatistics)]) -> [Int64: Double] {
+            Dictionary(uniqueKeysWithValues: buckets.compactMap { b in
+                b.stats.sumQuantity()?.doubleValue(for: .kilocalorie()).map { (toMs(b.start), $0) }
+            })
+        }
+        let active = kcalByStart(await activeB)
+        let basal = kcalByStart(await basalB)
+        let bucketMs = Int64(Self.bucketMinutes * 60_000)
+        let tz = currentTzOffset()
+        let createdAt = toMs(Date())
+        return Set(active.keys).union(basal.keys).sorted().compactMap { startMs in
+            let total = (active[startMs] ?? 0) + (basal[startMs] ?? 0)
+            guard total > 0 else { return nil }
+            let value = CaloriesIntervalValue(total: total, active: active[startMs])
+            return HealthRecord(dataType: Self.dataTypeCaloriesInterval, timestamp: startMs, endTimestamp: startMs + bucketMs, tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
+        }
+    }
+
+    /// 당일 누적 걸음 수(steps_daily) 1건 — [date] 가 가리키는 날 자정~수집 시점 누적. metric 에서 분리된 독립 타입.
+    func queryStepsDaily(date: Date) async -> [HealthRecord] {
+        let dayStart = Calendar.current.startOfDay(for: date)
+        guard let total = await querySumBucketed(.stepCount, unit: .count(), bucketStart: dayStart, interval: DateComponents(day: 1)), total > 0 else { return [] }
+        let value = StepsDailyValue(count: Int(total))
+        return [HealthRecord(dataType: Self.dataTypeStepsDaily, timestamp: toMs(dayStart), endTimestamp: toMs(Date()), tzOffset: currentTzOffset(), source: Self.source, valueJson: encodeToJson(value), createdAt: toMs(Date()))]
     }
 
     func queryEndedSleepSessions(since: Date, to: Date) async -> [HealthRecord] {
@@ -180,7 +220,8 @@ final class HealthKitClient: @unchecked Sendable {
             tzOffset: tz,
             source: Self.source,
             valueJson: encodeToJson(v),
-            createdAt: toMs(Date())
+            createdAt: toMs(Date()),
+            uid: workout.uuid.uuidString
         )
     }
 
@@ -326,7 +367,8 @@ final class HealthKitClient: @unchecked Sendable {
                 tzOffset: tz,
                 source: Self.source,
                 valueJson: encodeToJson(value),
-                createdAt: now
+                createdAt: now,
+                uid: sample.uuid.uuidString
             )
         }
     }
@@ -384,7 +426,8 @@ final class HealthKitClient: @unchecked Sendable {
                 tzOffset: tz,
                 source: Self.source,
                 valueJson: encodeToJson(value),
-                createdAt: now
+                createdAt: now,
+                uid: sample.uuid.uuidString
             )
         }
     }
@@ -422,7 +465,8 @@ final class HealthKitClient: @unchecked Sendable {
                 tzOffset: tz,
                 source: Self.source,
                 valueJson: encodeToJson(value),
-                createdAt: now
+                createdAt: now,
+                uid: sample.uuid.uuidString
             )
         }
     }
@@ -455,7 +499,8 @@ final class HealthKitClient: @unchecked Sendable {
                         tzOffset: tz,
                         source: Self.source,
                         valueJson: self.encodeToJson(value),
-                        createdAt: now
+                        createdAt: now,
+                        uid: correlation.uuid.uuidString
                     )
                 }
                 continuation.resume(returning: records)
@@ -610,7 +655,8 @@ final class HealthKitClient: @unchecked Sendable {
                 tzOffset: tz,
                 source: Self.source,
                 valueJson: encodeToJson(WaterIntakeValue(amount: v, cumulativeToDate: running)),
-                createdAt: now
+                createdAt: now,
+                uid: sample.uuid.uuidString
             ))
         }
         return records.sorted { $0.timestamp > $1.timestamp }
@@ -674,7 +720,8 @@ final class HealthKitClient: @unchecked Sendable {
                         tzOffset: tz,
                         source: Self.source,
                         valueJson: self.encodeToJson(value),
-                        createdAt: now
+                        createdAt: now,
+                        uid: ev.uuid.uuidString
                     )
                 }
                 if !resumed { resumed = true; continuation.resume(returning: records) }
@@ -785,13 +832,9 @@ final class HealthKitClient: @unchecked Sendable {
         return String(format: "%@%02d:%02d", sign, hours, minutes)
     }
 
-    private func querySumQuantity(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, from: Date, to: Date) async -> Double? {
-        await queryStatistics(identifier, options: .cumulativeSum, unit: unit, from: from, to: to) { $0.sumQuantity() }
-    }
-
     /// 일/시 집계 전용 버킷 합산. 단순 overlap-sum 은 경계(자정/정시)를 가로지른 누적 샘플을 전량 더해 over-count 된다.
     /// HKStatisticsCollectionQuery 가 경계 샘플을 시간비례로 나누고 multi-source 를 자동 중복 제거 → Apple 건강 UI 와 일치.
-    /// bucketStart 에 맞춘 단일 버킷의 합만 반환. (임의 구간엔 부적용 → querySumQuantity 사용)
+    /// bucketStart 에 맞춘 단일 버킷의 합만 반환(steps_daily·hourly/daily summary 의 일/시 누적용).
     private func querySumBucketed(
         _ identifier: HKQuantityTypeIdentifier,
         unit: HKUnit,
@@ -845,26 +888,6 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    private func queryStatistics(
-        _ identifier: HKQuantityTypeIdentifier,
-        options: HKStatisticsOptions,
-        unit: HKUnit,
-        from: Date,
-        to: Date,
-        valueExtractor: @escaping (HKStatistics) -> HKQuantity?
-    ) async -> Double? {
-        guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
-        // .strictStartDate 는 자정 가로지른 샘플을 누락 → 기본 overlap 으로 Apple 건강 UI 와 합산 일치.
-        let predicate = HKQuery.predicateForSamples(withStart: from, end: to, options: [])
-        return await withCheckedContinuation { continuation in
-            let query = HKStatisticsQuery(quantityType: quantityType, quantitySamplePredicate: predicate, options: options) { _, stats, _ in
-                let value = stats.flatMap { valueExtractor($0)?.doubleValue(for: unit) }
-                continuation.resume(returning: value)
-            }
-            store.execute(query)
-        }
-    }
-
     /// 단순 quantity 샘플들을 개별 HealthRecord 로 수집하는 범용 헬퍼.
     /// `valueBuilder` 가 nil 을 반환하면 해당 샘플은 스킵한다.
     private func queryQuantitySamples<T: Encodable>(
@@ -894,7 +917,8 @@ final class HealthKitClient: @unchecked Sendable {
                 tzOffset: tz,
                 source: Self.source,
                 valueJson: encodeToJson(value),
-                createdAt: now
+                createdAt: now,
+                uid: sample.uuid.uuidString
             )
         }
     }
@@ -1034,18 +1058,32 @@ final class HealthKitClient: @unchecked Sendable {
 
     // MARK: - valueJson 직렬화용 Codable 구조체
 
-    private struct MetricValue: Codable {
-        let heartRateAvg: Int?
-        let heartRateMin: Int?
-        let heartRateMax: Int?
-        let stepsInterval: Int?
-        let stepsDaily: Int?
-        let caloriesInterval: Double?
-        let caloriesDaily: Double?
-        let caloriesActiveInterval: Double?
-        let caloriesActiveDaily: Double?
-        let distanceInterval: Double?
-        let distanceDaily: Double?
+    /// 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate).
+    private struct HeartRateValue: Codable {
+        let avg: Int?
+        let min: Int?
+        let max: Int?
+    }
+
+    /// 걸음 10분 격자 버킷 값. metric 에서 분리된 독립 타입(steps_interval).
+    private struct StepsIntervalValue: Codable {
+        let count: Int
+    }
+
+    /// 이동 거리 10분 격자 버킷 값(m). metric 에서 분리된 독립 타입(distance_interval).
+    private struct DistanceIntervalValue: Codable {
+        let distance: Double
+    }
+
+    /// 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동. metric 에서 분리된 독립 타입(calories_interval).
+    private struct CaloriesIntervalValue: Codable {
+        let total: Double
+        let active: Double?
+    }
+
+    /// 당일 누적 걸음 수. metric 에서 분리된 독립 타입(steps_daily).
+    private struct StepsDailyValue: Codable {
+        let count: Int
     }
 
     fileprivate struct SleepValue: Codable {
@@ -1163,7 +1201,12 @@ final class HealthKitClient: @unchecked Sendable {
 
     // MARK: - 상수
 
-    static let dataTypeMetric = "metric"
+    static let bucketMinutes = 10
+    static let dataTypeHeartRate = "heart_rate"
+    static let dataTypeStepsInterval = "steps_interval"
+    static let dataTypeDistanceInterval = "distance_interval"
+    static let dataTypeCaloriesInterval = "calories_interval"
+    static let dataTypeStepsDaily = "steps_daily"
     static let dataTypeSleep = "sleep"
     static let dataTypeExercise = "exercise"
     static let dataTypeHourlySummary = "hourly_summary"
@@ -1190,9 +1233,11 @@ struct HealthRecord {
     let source: String
     let valueJson: String
     let createdAt: Int64
+    /// 원본 HKSample.uuid (record 류). 집계 버킷·요약은 원본 레코드가 아니라 nil. 기본 nil 이라 빌더가 필요할 때만 채운다.
+    var uid: String? = nil
 
     func toDictionary() -> [String: Any] {
-        return [
+        var dict: [String: Any] = [
             "dataType": dataType,
             "timestamp": timestamp,
             "endTimestamp": endTimestamp,
@@ -1201,5 +1246,7 @@ struct HealthRecord {
             "valueJson": valueJson,
             "createdAt": createdAt,
         ]
+        if let uid = uid { dict["uid"] = uid }
+        return dict
     }
 }

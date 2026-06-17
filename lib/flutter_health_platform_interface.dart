@@ -22,7 +22,16 @@ abstract class FlutterHealthPlatform extends PlatformInterface {
   Future<void> disconnect() => throw UnimplementedError();
   Future<bool> isPermissionGranted() => throw UnimplementedError();
   Future<bool> requestPermission() => throw UnimplementedError();
-  Future<HealthRecord?> queryMetric(DateTime from, DateTime to) => throw UnimplementedError();
+  /// 심박수를 벽시계 10분 격자 버킷(avg/min/max, bpm)별로 반환. metric 에서 분리된 독립 타입(heart_rate). 완료된 칸만.
+  Future<List<HealthRecord>> queryHeartRate(DateTime since, DateTime to) => throw UnimplementedError();
+  /// 걸음 수를 벽시계 10분 격자 버킷(count)별 합으로 반환(steps_interval). 완료된 칸만.
+  Future<List<HealthRecord>> querySteps(DateTime since, DateTime to) => throw UnimplementedError();
+  /// 이동 거리를 벽시계 10분 격자 버킷(distance, m)별 합으로 반환(distance_interval). 완료된 칸만.
+  Future<List<HealthRecord>> queryDistance(DateTime since, DateTime to) => throw UnimplementedError();
+  /// 소비 칼로리를 벽시계 10분 격자 버킷(total/active, kcal)별 합으로 반환(calories_interval). 완료된 칸만.
+  Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) => throw UnimplementedError();
+  /// 당일 누적 걸음 수(steps_daily) 1건. [date] 가 가리키는 날의 자정~수집 시점 누적.
+  Future<List<HealthRecord>> queryStepsDaily(DateTime date) => throw UnimplementedError();
   Future<List<HealthRecord>> queryEndedSleepSessions(DateTime since, DateTime to) => throw UnimplementedError();
   Future<List<HealthRecord>> queryEndedExerciseSessions(DateTime since, DateTime to) => throw UnimplementedError();
   Future<HealthRecord?> queryHourlySummary(DateTime hourStart, DateTime hourEnd) => throw UnimplementedError();

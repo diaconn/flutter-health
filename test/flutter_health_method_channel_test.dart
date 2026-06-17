@@ -20,10 +20,11 @@ void main() {
           return false;
         case 'requestPermission':
           return true;
-        case 'queryMetric':
         case 'queryHourlySummary':
         case 'queryDailySummary':
           return null;
+        case 'queryHeartRate':
+        case 'querySteps':
         case 'queryEndedSleepSessions':
         case 'queryEndedExerciseSessions':
           return [];
@@ -50,10 +51,10 @@ void main() {
     expect(await platform.isPermissionGranted(), false);
   });
 
-  test('queryMetric returns null when channel returns null', () async {
-    final result = await platform.queryMetric(
-        DateTime.now().subtract(const Duration(minutes: 5)), DateTime.now());
-    expect(result, isNull);
+  test('queryHeartRate returns empty list when channel returns empty', () async {
+    final result = await platform.queryHeartRate(
+        DateTime.now().subtract(const Duration(minutes: 10)), DateTime.now());
+    expect(result, isEmpty);
   });
 
   test('queryEndedSleepSessions returns empty list', () async {
