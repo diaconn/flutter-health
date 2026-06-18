@@ -118,7 +118,7 @@ final class HealthKitClient: @unchecked Sendable {
         // 버킷 시작(ms) → kcal 로 인덱싱. total = active + basal, 한쪽만 있는 칸도 살리려 키 합집합으로 순회.
         func kcalByStart(_ buckets: [(start: Date, end: Date, stats: HKStatistics)]) -> [Int64: Double] {
             Dictionary(uniqueKeysWithValues: buckets.compactMap { b in
-                b.stats.sumQuantity()?.doubleValue(for: .kilocalorie()).map { (toMs(b.start), $0) }
+                (b.stats.sumQuantity()?.doubleValue(for: .kilocalorie())).map { (toMs(b.start), $0) }
             })
         }
         let active = kcalByStart(await activeB)
