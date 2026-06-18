@@ -376,7 +376,9 @@ final class HealthKitClient: @unchecked Sendable {
     /// body composition 보조 측정(BMI·체지방% 등)을 "측정일(로컬) → 값" 맵으로 반환해 weight 샘플에 매칭한다.
     private func fetchQuantityByDay(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, since: Date, to: Date, scale: Double = 1) async -> [Date: Double] {
         guard let qt = HKQuantityType.quantityType(forIdentifier: identifier) else { return [:] }
-        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
+        // 보조지표(bodyFat·bmi)는 weight 샘플과 '같은 날'로 매칭하므로 조회창을 그 날 시작(자정)부터로 넓힌다.
+        // 5분/증분 창이면 같은 날 입력분을 놓쳐 체성분 facet 이 유실되던 것을 방지(매칭은 여전히 일자 기준).
+        let predicate = HKQuery.predicateForSamples(withStart: Calendar.current.startOfDay(for: since), end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate)]
@@ -601,7 +603,9 @@ final class HealthKitClient: @unchecked Sendable {
     private func dailyNutrientSeries(_ id: HKQuantityTypeIdentifier, unit: HKUnit, since: Date, to: Date) async -> [Date: Double] {
         guard let qt = HKQuantityType.quantityType(forIdentifier: id) else { return [:] }
         let anchor = Calendar.current.startOfDay(for: since)
-        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: [])
+        // 영양은 하루 누적합 → 조회창을 그 날 시작(anchor=자정)부터로 넓혀 부분합(5분/증분 창) 박제를 방지한다.
+        // 한 번의 fetch 가 '그 날 전체 합'을 emit → 서버 do update 가 최신(더 완전한) 합으로 갱신.
+        let predicate = HKQuery.predicateForSamples(withStart: anchor, end: to, options: [])
         let interval = DateComponents(day: 1)
         return await withCheckedContinuation { continuation in
             let query = HKStatisticsCollectionQuery(
@@ -798,6 +802,7 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .bloodGlucose)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)!,
+        HKObjectType.quantityType(forIdentifier: .insulinDelivery)!,   // 인슐린 투여(iOS) — read set 누락으로 미수집되던 것 추가
         HKObjectType.quantityType(forIdentifier: .dietaryWater)!,
         // 영양(nutrition) 세부 영양소
         HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)!,
