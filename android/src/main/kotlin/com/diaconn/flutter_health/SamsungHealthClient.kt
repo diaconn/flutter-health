@@ -77,7 +77,7 @@ class SamsungHealthClient(private val context: Context) {
     }
 
     /**
-     * 심박수를 **벽시계 10분 격자 버킷**별 평균/최소/최대(bpm)로 반환(heart_rate). 완료된(닫힌) 칸만.
+     * 심박수를 **벽시계 10분 격자 버킷**별 평균/최소/최대(bpm)로 반환(heart_rate_interval). 완료된(닫힌) 칸만.
      * steps/distance/calories 와 달리 그룹 집계로 avg/min/max 를 한 번에 못 받아, raw HEART_RATE 포인트를 격자로 직접 묶는다.
      */
     suspend fun queryHeartRate(since: Long, to: Long): List<HealthRecord> {
@@ -103,12 +103,12 @@ class SamsungHealthClient(private val context: Context) {
                 val bucketEnd = bucketStart + BUCKET_MS
                 if (bucketEnd > to || values.isEmpty()) return@mapNotNull null // 완료된 칸만
                 HealthRecord(
-                    dataType = DATA_TYPE_HEART_RATE,
+                    dataType = DATA_TYPE_HEART_RATE_INTERVAL,
                     timestamp = bucketStart,
                     endTimestamp = bucketEnd,
                     tzOffset = tz,
                     source = SOURCE,
-                    valueJson = json.encodeToString(HeartRateValue(
+                    valueJson = json.encodeToString(HeartRateIntervalValue(
                         avg = (values.sum() / values.size).takeIf { it > 0 },
                         min = values.min().takeIf { it > 0 },
                         max = values.max().takeIf { it > 0 }
@@ -789,9 +789,9 @@ class SamsungHealthClient(private val context: Context) {
 
     // --- valueJson 직렬화용 내부 데이터 클래스 ---
 
-    /** 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate). */
+    /** 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate_interval). */
     @Serializable
-    private data class HeartRateValue(
+    private data class HeartRateIntervalValue(
         val avg: Int?,
         val min: Int?,
         val max: Int?
@@ -926,10 +926,10 @@ class SamsungHealthClient(private val context: Context) {
     private data class HeightValue(val value: Double)
 
     companion object {
-        // 격자 버킷 크기 (heart_rate·steps_interval·distance_interval·calories_interval 공통).
+        // 격자 버킷 크기 (heart_rate_interval·steps_interval·distance_interval·calories_interval 공통).
         const val BUCKET_MIN = 10
         const val BUCKET_MS = BUCKET_MIN * 60 * 1000L
-        const val DATA_TYPE_HEART_RATE = "heart_rate"
+        const val DATA_TYPE_HEART_RATE_INTERVAL = "heart_rate_interval"
         const val DATA_TYPE_STEPS_INTERVAL = "steps_interval"
         const val DATA_TYPE_DISTANCE_INTERVAL = "distance_interval"
         const val DATA_TYPE_CALORIES_INTERVAL = "calories_interval"

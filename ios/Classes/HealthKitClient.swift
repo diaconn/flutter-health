@@ -69,7 +69,7 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// 심박수를 **벽시계 10분 격자 버킷**(예: 09:00~09:10)별 평균/최소/최대(bpm)로 반환. metric 에서 분리된 독립 타입(heart_rate).
+    /// 심박수를 **벽시계 10분 격자 버킷**(예: 09:00~09:10)별 평균/최소/최대(bpm)로 반환. metric 에서 분리된 독립 타입(heart_rate_interval).
     func queryHeartRate(since: Date, to: Date) async -> [HealthRecord] {
         let unit = HKUnit(from: "count/min")
         let buckets = await queryGridBuckets(.heartRate, options: [.discreteAverage, .discreteMin, .discreteMax], since: since, to: to)
@@ -81,8 +81,8 @@ final class HealthKitClient: @unchecked Sendable {
                 return Int(d)
             }
             guard let avg = intOf(b.stats.averageQuantity()) else { return nil } // 그 칸에 심박 샘플 없으면 스킵
-            let value = HeartRateValue(avg: avg, min: intOf(b.stats.minimumQuantity()), max: intOf(b.stats.maximumQuantity()))
-            return HealthRecord(dataType: Self.dataTypeHeartRate, timestamp: toMs(b.start), endTimestamp: toMs(b.end), tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
+            let value = HeartRateIntervalValue(avg: avg, min: intOf(b.stats.minimumQuantity()), max: intOf(b.stats.maximumQuantity()))
+            return HealthRecord(dataType: Self.dataTypeHeartRateInterval, timestamp: toMs(b.start), endTimestamp: toMs(b.end), tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
         }
     }
 
@@ -1058,8 +1058,8 @@ final class HealthKitClient: @unchecked Sendable {
 
     // MARK: - valueJson 직렬화용 Codable 구조체
 
-    /// 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate).
-    private struct HeartRateValue: Codable {
+    /// 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate_interval).
+    private struct HeartRateIntervalValue: Codable {
         let avg: Int?
         let min: Int?
         let max: Int?
@@ -1202,7 +1202,7 @@ final class HealthKitClient: @unchecked Sendable {
     // MARK: - 상수
 
     static let bucketMinutes = 10
-    static let dataTypeHeartRate = "heart_rate"
+    static let dataTypeHeartRateInterval = "heart_rate_interval"
     static let dataTypeStepsInterval = "steps_interval"
     static let dataTypeDistanceInterval = "distance_interval"
     static let dataTypeCaloriesInterval = "calories_interval"

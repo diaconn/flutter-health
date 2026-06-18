@@ -82,7 +82,7 @@ await health.requestPermission();
 final now = DateTime.now();
 final beats = await health.queryHeartRate(now.subtract(Duration(minutes: 15)), now);
 for (final r in beats) {
-  print(r.valueJson);  // HeartRateValue JSON
+  print(r.valueJson);  // HeartRateIntervalValue JSON
 }
 ```
 
@@ -118,7 +118,7 @@ for (final r in beats) {
 
 ```dart
 class HealthRecord {
-  final String dataType;    // "heart_rate" | "steps_interval" | "distance_interval" | "calories_interval" | "steps_daily" | "sleep" | "exercise" | "hourly_summary" | "daily_summary" | "weight" ...
+  final String dataType;    // "heart_rate_interval" | "steps_interval" | "distance_interval" | "calories_interval" | "steps_daily" | "sleep" | "exercise" | "hourly_summary" | "daily_summary" | "weight" ...
   final int timestamp;      // UTC epoch ms (구간 시작)
   final int endTimestamp;   // UTC epoch ms (구간 종료)
   final String tzOffset;    // "+09:00" 형식
@@ -131,7 +131,7 @@ class HealthRecord {
 `valueJson`을 타입드 모델로 파싱하는 편의 getter도 제공합니다.
 
 ```dart
-record.asHeartRate         // HeartRateValue?
+record.asHeartRateInterval // HeartRateIntervalValue?
 record.asStepsInterval     // StepsIntervalValue?
 record.asDistanceInterval  // DistanceIntervalValue?
 record.asCaloriesInterval  // CaloriesIntervalValue?

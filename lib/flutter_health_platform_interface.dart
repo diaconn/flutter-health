@@ -22,7 +22,7 @@ abstract class FlutterHealthPlatform extends PlatformInterface {
   Future<void> disconnect() => throw UnimplementedError();
   Future<bool> isPermissionGranted() => throw UnimplementedError();
   Future<bool> requestPermission() => throw UnimplementedError();
-  /// 심박수를 벽시계 10분 격자 버킷(avg/min/max, bpm)별로 반환. metric 에서 분리된 독립 타입(heart_rate). 완료된 칸만.
+  /// 심박수를 벽시계 10분 격자 버킷(avg/min/max, bpm)별로 반환. metric 에서 분리된 독립 타입(heart_rate_interval). 완료된 칸만.
   Future<List<HealthRecord>> queryHeartRate(DateTime since, DateTime to) => throw UnimplementedError();
   /// 걸음 수를 벽시계 10분 격자 버킷(count)별 합으로 반환(steps_interval). 완료된 칸만.
   Future<List<HealthRecord>> querySteps(DateTime since, DateTime to) => throw UnimplementedError();

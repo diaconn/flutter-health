@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'heart_rate_value.dart';
+import 'heart_rate_interval_value.dart';
 import 'steps_interval_value.dart';
 import 'distance_interval_value.dart';
 import 'calories_interval_value.dart';
@@ -18,7 +18,7 @@ import 'step_segment_value.dart';
 import 'height_value.dart';
 
 class HealthRecord {
-  static const String typeHeartRate = 'heart_rate';
+  static const String typeHeartRateInterval = 'heart_rate_interval';
   static const String typeStepsInterval = 'steps_interval';
   static const String typeDistanceInterval = 'distance_interval';
   static const String typeCaloriesInterval = 'calories_interval';
@@ -45,7 +45,7 @@ class HealthRecord {
   final int createdAt;
 
   /// 원본 레코드의 네이티브 고유 id (iOS=HKSample.uuid / Android=HealthDataPoint.uid).
-  /// 집계 버킷(heart_rate·steps_interval·distance_interval·calories_interval·steps_daily·요약)은 원본 레코드가 아니라 null.
+  /// 집계 버킷(heart_rate_interval·steps_interval·distance_interval·calories_interval·steps_daily·요약)은 원본 레코드가 아니라 null.
   final String? uid;
 
   const HealthRecord({
@@ -72,7 +72,8 @@ class HealthRecord {
 
   Map<String, dynamic> _decoded() => jsonDecode(valueJson) as Map<String, dynamic>;
 
-  HeartRateValue? get asHeartRate => dataType == typeHeartRate ? HeartRateValue.fromJson(_decoded()) : null;
+  HeartRateIntervalValue? get asHeartRateInterval =>
+      dataType == typeHeartRateInterval ? HeartRateIntervalValue.fromJson(_decoded()) : null;
   StepsIntervalValue? get asStepsInterval =>
       dataType == typeStepsInterval ? StepsIntervalValue.fromJson(_decoded()) : null;
   DistanceIntervalValue? get asDistanceInterval =>

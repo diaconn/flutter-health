@@ -1,5 +1,5 @@
 export 'src/models/health_record.dart';
-export 'src/models/heart_rate_value.dart';
+export 'src/models/heart_rate_interval_value.dart';
 export 'src/models/steps_interval_value.dart';
 export 'src/models/distance_interval_value.dart';
 export 'src/models/calories_interval_value.dart';
@@ -39,7 +39,7 @@ class FlutterHealth {
   /// 삼성헬스 / HealthKit 권한 UI를 표시. 일부만 허용해도 true 반환.
   Future<bool> requestPermission() => FlutterHealthPlatform.instance.requestPermission();
 
-  /// [since]~[to] 구간의 심박수를 **벽시계 10분 격자 버킷**별 집계(avg/min/max, bpm)로 반환(heart_rate). 완료된(닫힌) 칸만.
+  /// [since]~[to] 구간의 심박수를 **벽시계 10분 격자 버킷**별 집계(avg/min/max, bpm)로 반환(heart_rate_interval). 완료된(닫힌) 칸만.
   Future<List<HealthRecord>> queryHeartRate(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryHeartRate(since, to);
 

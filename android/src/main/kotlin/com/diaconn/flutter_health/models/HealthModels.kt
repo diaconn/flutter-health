@@ -8,7 +8,7 @@ data class HealthRecord(
     val source: String,
     val valueJson: String,
     val createdAt: Long,
-    // 원본 HealthDataPoint.uid (record 류). 집계 버킷(heart_rate·steps_interval 등)·요약은 원본 레코드가 아니라 null.
+    // 원본 HealthDataPoint.uid (record 류). 집계 버킷(heart_rate_interval·steps_interval 등)·요약은 원본 레코드가 아니라 null.
     val uid: String? = null,
 )
 
