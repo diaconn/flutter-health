@@ -638,8 +638,7 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// 각 수분 샘플에 그 샘플이 속한 로컬 달력일 안에서 자정부터 그 시각까지 쌓인 누적량(cumulativeToDate)을 담는다.
-    /// 같은 날끼리 startDate 오름차순 prefix-sum. 최신 샘플의 cumulativeToDate = 그날 전체 합계.
+    /// 각 수분 샘플을 그 음용의 원본 양(amount)만 담아 반환한다
     /// 반환은 표시 일관성 위해 최신순(내림차순).
     func queryWaterIntake(since: Date, to: Date) async -> [HealthRecord] {
         guard let qt = HKQuantityType.quantityType(forIdentifier: .dietaryWater) else { return [] }
@@ -647,32 +646,27 @@ final class HealthKitClient: @unchecked Sendable {
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate, order: .forward)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
         )
         guard let samples = try? await descriptor.result(for: store) else { return [] }
         let tz = currentTzOffset()
         let now = toMs(Date())
-        let cal = Calendar.current
-        var runningByDay: [Date: Double] = [:]
         var records: [HealthRecord] = []
-        for sample in samples {   // startDate 오름차순
+        for sample in samples {
             let v = sample.quantity.doubleValue(for: unit)
             guard v > 0 else { continue }
-            let day = cal.startOfDay(for: sample.startDate)
-            let running = (runningByDay[day] ?? 0) + v
-            runningByDay[day] = running
             records.append(HealthRecord(
                 dataType: Self.dataTypeWaterIntake,
                 timestamp: toMs(sample.startDate),
                 endTimestamp: toMs(sample.endDate),
                 tzOffset: tz,
                 source: Self.source,
-                valueJson: encodeToJson(WaterIntakeValue(amount: v, cumulativeToDate: running)),
+                valueJson: encodeToJson(WaterIntakeValue(amount: v)),
                 createdAt: now,
                 uid: sample.uuid.uuidString
             ))
         }
-        return records.sorted { $0.timestamp > $1.timestamp }
+        return records
     }
 
     /// 키(신장) — HealthKit `height` 샘플을 **cm** 로 반환 (dataType="height"). Android(UserProfile)와 단위 통일.
@@ -1182,8 +1176,7 @@ final class HealthKitClient: @unchecked Sendable {
     }
 
     fileprivate struct WaterIntakeValue: Codable {
-        let amount: Double
-        var cumulativeToDate: Double? = nil   // 당일 자정~이 샘플 시각 누적 (nil 이면 JSONEncoder 가 키 생략)
+        let amount: Double   // 각 음용의 원본 양(mL).
     }
 
     fileprivate struct StepSegmentValue: Codable {

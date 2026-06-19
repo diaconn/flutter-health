@@ -524,9 +524,8 @@ class SamsungHealthClient(private val context: Context) {
         }
 
     /**
-     * [since]~[to] 구간 내 모든 수분 섭취 기록. 각 기록에 그 레코드가 속한 로컬 달력일 안에서
-     * 자정부터 그 시각까지 쌓인 누적량(cumulativeToDate)을 함께 담는다(같은 날끼리 시각 오름차순 prefix-sum).
-     * 최신 레코드의 cumulativeToDate = 그날 전체 합계. 반환은 표시 일관성 위해 최신순(내림차순).
+     * [since]~[to] 구간 내 모든 수분 섭취 기록.
+     * 반환은 표시 일관성 위해 최신순(내림차순).
      */
     suspend fun queryWaterIntake(since: Long, to: Long): List<HealthRecord> {
         val s = store ?: return emptyList()
@@ -536,36 +535,21 @@ class SamsungHealthClient(private val context: Context) {
             val tz = currentTzOffset()
             val now = System.currentTimeMillis()
 
-            data class WaterRaw(val startMs: Long, val endMs: Long, val amount: Double, val uid: String?)
-            val raws = s.readData(request).dataList.mapNotNull { point ->
+            s.readData(request).dataList.mapNotNull { point ->
                 val amount = runCatching { point.getValue(DataType.WaterIntakeType.AMOUNT) }.getOrNull()
                 if (amount == null || amount <= 0f) return@mapNotNull null
                 val startMs = point.startTime?.toEpochMilli() ?: return@mapNotNull null
-                WaterRaw(startMs, point.endTime?.toEpochMilli() ?: startMs, amount.toDouble(), point.uid)
-            }
-
-            // 로컬 달력일별로 묶어 시각 오름차순 prefix-sum → cumulativeToDate. 표시용으로 다시 최신순 정렬.
-            raws.groupBy { Instant.ofEpochMilli(it.startMs).atZone(ZoneId.systemDefault()).toLocalDate() }
-                .flatMap { (_, dayRaws) ->
-                    var running = 0.0
-                    dayRaws.sortedBy { it.startMs }.map { r ->
-                        running += r.amount
-                        HealthRecord(
-                            dataType = DATA_TYPE_WATER_INTAKE,
-                            timestamp = r.startMs,
-                            endTimestamp = r.endMs,
-                            tzOffset = tz,
-                            source = SOURCE,
-                            valueJson = json.encodeToString(WaterIntakeValue(
-                                amount = r.amount,
-                                cumulativeToDate = running,
-                            )),
-                            createdAt = now,
-                            uid = r.uid,
-                        )
-                    }
-                }
-                .sortedByDescending { it.timestamp }
+                HealthRecord(
+                    dataType = DATA_TYPE_WATER_INTAKE,
+                    timestamp = startMs,
+                    endTimestamp = point.endTime?.toEpochMilli() ?: startMs,
+                    tzOffset = tz,
+                    source = SOURCE,
+                    valueJson = json.encodeToString(WaterIntakeValue(amount = amount.toDouble())),
+                    createdAt = now,
+                    uid = point.uid,
+                )
+            }.sortedByDescending { it.timestamp }
         }.onFailure { Log.e(TAG, "수분 섭취 조회 실패", it) }.getOrDefault(emptyList())
     }
 
@@ -919,7 +903,7 @@ class SamsungHealthClient(private val context: Context) {
     )
 
     @Serializable
-    private data class WaterIntakeValue(val amount: Double, val cumulativeToDate: Double? = null)
+    private data class WaterIntakeValue(val amount: Double)
 
 
     @Serializable
