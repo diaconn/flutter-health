@@ -18,6 +18,9 @@ class NutritionValue {
   final double? vitaminC;
   final double? calcium;
   final double? iron;
+  final double? magnesium;
+  final double? caffeine;
+  final double? vitaminD;
 
   const NutritionValue({
     this.mealType,
@@ -39,6 +42,9 @@ class NutritionValue {
     this.vitaminC,
     this.calcium,
     this.iron,
+    this.magnesium,
+    this.caffeine,
+    this.vitaminD,
   });
 
   factory NutritionValue.fromJson(Map<String, dynamic> json) => NutritionValue(
@@ -61,6 +67,9 @@ class NutritionValue {
         vitaminC: (json['vitaminC'] as num?)?.toDouble(),
         calcium: (json['calcium'] as num?)?.toDouble(),
         iron: (json['iron'] as num?)?.toDouble(),
+        magnesium: (json['magnesium'] as num?)?.toDouble(),
+        caffeine: (json['caffeine'] as num?)?.toDouble(),
+        vitaminD: (json['vitaminD'] as num?)?.toDouble(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -83,5 +92,8 @@ class NutritionValue {
         if (vitaminC != null) 'vitaminC': vitaminC,
         if (calcium != null) 'calcium': calcium,
         if (iron != null) 'iron': iron,
+        if (magnesium != null) 'magnesium': magnesium,
+        if (caffeine != null) 'caffeine': caffeine,
+        if (vitaminD != null) 'vitaminD': vitaminD,
       };
 }

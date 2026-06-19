@@ -535,6 +535,9 @@ final class HealthKitClient: @unchecked Sendable {
         async let vitaminCS     = dailyNutrientSeries(.dietaryVitaminC, unit: mg, since: since, to: to)
         async let calciumS      = dailyNutrientSeries(.dietaryCalcium, unit: mg, since: since, to: to)
         async let ironS         = dailyNutrientSeries(.dietaryIron, unit: mg, since: since, to: to)
+        async let magnesiumS    = dailyNutrientSeries(.dietaryMagnesium, unit: mg, since: since, to: to)
+        async let caffeineS     = dailyNutrientSeries(.dietaryCaffeine, unit: mg, since: since, to: to)
+        async let vitaminDS     = dailyNutrientSeries(.dietaryVitaminD, unit: mcg, since: since, to: to)
 
         let calories = await caloriesS
         let totalFat = await totalFatS
@@ -552,11 +555,14 @@ final class HealthKitClient: @unchecked Sendable {
         let vitaminC = await vitaminCS
         let calcium = await calciumS
         let iron = await ironS
+        let magnesium = await magnesiumS
+        let caffeine = await caffeineS
+        let vitaminD = await vitaminDS
 
         // 데이터가 하나라도 있는 날짜의 합집합
         var dayKeys = Set<Date>()
         for m in [calories, totalFat, saturatedFat, polyFat, monoFat, carbohydrate, fiber, sugar,
-                  protein, cholesterol, sodium, potassium, vitaminA, vitaminC, calcium, iron] {
+                  protein, cholesterol, sodium, potassium, vitaminA, vitaminC, calcium, iron, magnesium, caffeine, vitaminD] {
             dayKeys.formUnion(m.keys)
         }
 
@@ -583,7 +589,10 @@ final class HealthKitClient: @unchecked Sendable {
                 vitaminA: vitaminA[day],
                 vitaminC: vitaminC[day],
                 calcium: calcium[day],
-                iron: iron[day]
+                iron: iron[day],
+                magnesium: magnesium[day],
+                caffeine: caffeine[day],
+                vitaminD: vitaminD[day]
             )
             let dayEnd = cal.date(byAdding: .day, value: 1, to: day).map { toMs($0) - 1 } ?? toMs(day)
             return HealthRecord(
@@ -820,7 +829,10 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .dietaryVitaminA)!,
         HKObjectType.quantityType(forIdentifier: .dietaryVitaminC)!,
         HKObjectType.quantityType(forIdentifier: .dietaryCalcium)!,
-        HKObjectType.quantityType(forIdentifier: .dietaryIron)!
+        HKObjectType.quantityType(forIdentifier: .dietaryIron)!,
+        HKObjectType.quantityType(forIdentifier: .dietaryMagnesium)!,
+        HKObjectType.quantityType(forIdentifier: .dietaryCaffeine)!,
+        HKObjectType.quantityType(forIdentifier: .dietaryVitaminD)!
         ]
         // 복약(iOS 26+)은 일반 read set 에 넣으면 크래시 → 여기서 제외하고
         // queryMedication 호출 시점에 requestMedicationAuthorization() 로 per-object 권한을 따로 요청한다.
@@ -1164,6 +1176,9 @@ final class HealthKitClient: @unchecked Sendable {
         let vitaminC: Double?
         let calcium: Double?
         let iron: Double?
+        let magnesium: Double?
+        let caffeine: Double?
+        let vitaminD: Double?
     }
 
     fileprivate struct WaterIntakeValue: Codable {
