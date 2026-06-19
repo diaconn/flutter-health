@@ -3,15 +3,15 @@
 /// iOS 는 [since]~[to] 구간의 키 샘플들을, Android 는 사용자 프로필에 설정된 현재 키 1건을 반환.
 class HeightValue {
   /// 키 (cm).
-  final double value;
+  final double height;
 
-  const HeightValue({required this.value});
+  const HeightValue({required this.height});
 
   factory HeightValue.fromJson(Map<String, dynamic> json) => HeightValue(
-        value: (json['value'] as num).toDouble(),
+        height: (json['height'] as num).toDouble(),
       );
 
   Map<String, dynamic> toJson() => {
-        'value': value,
+        'height': height,
       };
 }

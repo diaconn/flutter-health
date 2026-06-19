@@ -4,10 +4,10 @@ class HourlySummaryValue {
   final int? heartRateMin;
   final int? heartRateMax;
   final int? stepsTotal;
-  final double? caloriesTotalKcal;
-  final double? caloriesActiveTotalKcal;
-  final int? activeTimeTotalMin;
-  final double? distanceTotalM;
+  final double? caloriesTotal; // kcal (basal + active)
+  final double? caloriesActiveTotal; // kcal
+  final int? activeTimeTotal; // min
+  final double? distanceTotal; // m
 
   const HourlySummaryValue({
     required this.hour,
@@ -15,10 +15,10 @@ class HourlySummaryValue {
     this.heartRateMin,
     this.heartRateMax,
     this.stepsTotal,
-    this.caloriesTotalKcal,
-    this.caloriesActiveTotalKcal,
-    this.activeTimeTotalMin,
-    this.distanceTotalM,
+    this.caloriesTotal,
+    this.caloriesActiveTotal,
+    this.activeTimeTotal,
+    this.distanceTotal,
   });
 
   factory HourlySummaryValue.fromJson(Map<String, dynamic> json) => HourlySummaryValue(
@@ -27,10 +27,10 @@ class HourlySummaryValue {
         heartRateMin: json['heartRateMin'] as int?,
         heartRateMax: json['heartRateMax'] as int?,
         stepsTotal: json['stepsTotal'] as int?,
-        caloriesTotalKcal: (json['caloriesTotalKcal'] as num?)?.toDouble(),
-        caloriesActiveTotalKcal: (json['caloriesActiveTotalKcal'] as num?)?.toDouble(),
-        activeTimeTotalMin: json['activeTimeTotalMin'] as int?,
-        distanceTotalM: (json['distanceTotalM'] as num?)?.toDouble(),
+        caloriesTotal: (json['caloriesTotal'] as num?)?.toDouble(),
+        caloriesActiveTotal: (json['caloriesActiveTotal'] as num?)?.toDouble(),
+        activeTimeTotal: json['activeTimeTotal'] as int?,
+        distanceTotal: (json['distanceTotal'] as num?)?.toDouble(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -39,9 +39,9 @@ class HourlySummaryValue {
         if (heartRateMin != null) 'heartRateMin': heartRateMin,
         if (heartRateMax != null) 'heartRateMax': heartRateMax,
         if (stepsTotal != null) 'stepsTotal': stepsTotal,
-        if (caloriesTotalKcal != null) 'caloriesTotalKcal': caloriesTotalKcal,
-        if (caloriesActiveTotalKcal != null) 'caloriesActiveTotalKcal': caloriesActiveTotalKcal,
-        if (activeTimeTotalMin != null) 'activeTimeTotalMin': activeTimeTotalMin,
-        if (distanceTotalM != null) 'distanceTotalM': distanceTotalM,
+        if (caloriesTotal != null) 'caloriesTotal': caloriesTotal,
+        if (caloriesActiveTotal != null) 'caloriesActiveTotal': caloriesActiveTotal,
+        if (activeTimeTotal != null) 'activeTimeTotal': activeTimeTotal,
+        if (distanceTotal != null) 'distanceTotal': distanceTotal,
       };
 }

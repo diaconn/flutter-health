@@ -4,8 +4,8 @@ class NutritionValue {
   final double? calories;
   final double? totalFat;
   final double? saturatedFat;
-  final double? polysaturatedFat;
-  final double? monosaturatedFat;
+  final double? polyunsaturatedFat;
+  final double? monounsaturatedFat;
   final double? transFat;
   final double? carbohydrate;
   final double? dietaryFiber;
@@ -28,8 +28,8 @@ class NutritionValue {
     this.calories,
     this.totalFat,
     this.saturatedFat,
-    this.polysaturatedFat,
-    this.monosaturatedFat,
+    this.polyunsaturatedFat,
+    this.monounsaturatedFat,
     this.transFat,
     this.carbohydrate,
     this.dietaryFiber,
@@ -53,8 +53,8 @@ class NutritionValue {
         calories: (json['calories'] as num?)?.toDouble(),
         totalFat: (json['totalFat'] as num?)?.toDouble(),
         saturatedFat: (json['saturatedFat'] as num?)?.toDouble(),
-        polysaturatedFat: (json['polysaturatedFat'] as num?)?.toDouble(),
-        monosaturatedFat: (json['monosaturatedFat'] as num?)?.toDouble(),
+        polyunsaturatedFat: (json['polyunsaturatedFat'] as num?)?.toDouble(),
+        monounsaturatedFat: (json['monounsaturatedFat'] as num?)?.toDouble(),
         transFat: (json['transFat'] as num?)?.toDouble(),
         carbohydrate: (json['carbohydrate'] as num?)?.toDouble(),
         dietaryFiber: (json['dietaryFiber'] as num?)?.toDouble(),
@@ -78,8 +78,8 @@ class NutritionValue {
         if (calories != null) 'calories': calories,
         if (totalFat != null) 'totalFat': totalFat,
         if (saturatedFat != null) 'saturatedFat': saturatedFat,
-        if (polysaturatedFat != null) 'polysaturatedFat': polysaturatedFat,
-        if (monosaturatedFat != null) 'monosaturatedFat': monosaturatedFat,
+        if (polyunsaturatedFat != null) 'polyunsaturatedFat': polyunsaturatedFat,
+        if (monounsaturatedFat != null) 'monounsaturatedFat': monounsaturatedFat,
         if (transFat != null) 'transFat': transFat,
         if (carbohydrate != null) 'carbohydrate': carbohydrate,
         if (dietaryFiber != null) 'dietaryFiber': dietaryFiber,

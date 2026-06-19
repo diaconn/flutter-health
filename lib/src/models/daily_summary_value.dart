@@ -4,11 +4,11 @@ class DailySummaryValue {
   final int? heartRateMin;
   final int? heartRateMax;
   final int? stepsTotal;
-  final double? caloriesTotalKcal;
-  final double? caloriesActiveTotalKcal;
-  final int? activeTimeTotalMin;
-  final double? distanceTotalM;
-  final int? sleepDurationMin;
+  final double? caloriesTotal; // kcal (basal + active)
+  final double? caloriesActiveTotal; // kcal
+  final int? activeTimeTotal; // min
+  final double? distanceTotal; // m
+  final int? sleepDuration; // min
   final int? exerciseCount;
   final int? exerciseTotalMin;
   final double? exerciseTotalCalories;
@@ -19,11 +19,11 @@ class DailySummaryValue {
     this.heartRateMin,
     this.heartRateMax,
     this.stepsTotal,
-    this.caloriesTotalKcal,
-    this.caloriesActiveTotalKcal,
-    this.activeTimeTotalMin,
-    this.distanceTotalM,
-    this.sleepDurationMin,
+    this.caloriesTotal,
+    this.caloriesActiveTotal,
+    this.activeTimeTotal,
+    this.distanceTotal,
+    this.sleepDuration,
     this.exerciseCount,
     this.exerciseTotalMin,
     this.exerciseTotalCalories,
@@ -35,11 +35,11 @@ class DailySummaryValue {
         heartRateMin: json['heartRateMin'] as int?,
         heartRateMax: json['heartRateMax'] as int?,
         stepsTotal: json['stepsTotal'] as int?,
-        caloriesTotalKcal: (json['caloriesTotalKcal'] as num?)?.toDouble(),
-        caloriesActiveTotalKcal: (json['caloriesActiveTotalKcal'] as num?)?.toDouble(),
-        activeTimeTotalMin: json['activeTimeTotalMin'] as int?,
-        distanceTotalM: (json['distanceTotalM'] as num?)?.toDouble(),
-        sleepDurationMin: json['sleepDurationMin'] as int?,
+        caloriesTotal: (json['caloriesTotal'] as num?)?.toDouble(),
+        caloriesActiveTotal: (json['caloriesActiveTotal'] as num?)?.toDouble(),
+        activeTimeTotal: json['activeTimeTotal'] as int?,
+        distanceTotal: (json['distanceTotal'] as num?)?.toDouble(),
+        sleepDuration: json['sleepDuration'] as int?,
         exerciseCount: json['exerciseCount'] as int?,
         exerciseTotalMin: json['exerciseTotalMin'] as int?,
         exerciseTotalCalories: (json['exerciseTotalCalories'] as num?)?.toDouble(),
@@ -51,11 +51,11 @@ class DailySummaryValue {
         if (heartRateMin != null) 'heartRateMin': heartRateMin,
         if (heartRateMax != null) 'heartRateMax': heartRateMax,
         if (stepsTotal != null) 'stepsTotal': stepsTotal,
-        if (caloriesTotalKcal != null) 'caloriesTotalKcal': caloriesTotalKcal,
-        if (caloriesActiveTotalKcal != null) 'caloriesActiveTotalKcal': caloriesActiveTotalKcal,
-        if (activeTimeTotalMin != null) 'activeTimeTotalMin': activeTimeTotalMin,
-        if (distanceTotalM != null) 'distanceTotalM': distanceTotalM,
-        if (sleepDurationMin != null) 'sleepDurationMin': sleepDurationMin,
+        if (caloriesTotal != null) 'caloriesTotal': caloriesTotal,
+        if (caloriesActiveTotal != null) 'caloriesActiveTotal': caloriesActiveTotal,
+        if (activeTimeTotal != null) 'activeTimeTotal': activeTimeTotal,
+        if (distanceTotal != null) 'distanceTotal': distanceTotal,
+        if (sleepDuration != null) 'sleepDuration': sleepDuration,
         if (exerciseCount != null) 'exerciseCount': exerciseCount,
         if (exerciseTotalMin != null) 'exerciseTotalMin': exerciseTotalMin,
         if (exerciseTotalCalories != null) 'exerciseTotalCalories': exerciseTotalCalories,

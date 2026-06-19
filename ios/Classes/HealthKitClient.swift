@@ -233,14 +233,14 @@ final class HealthKitClient: @unchecked Sendable {
         async let activeKcalQ = querySumBucketed(.activeEnergyBurned, unit: .kilocalorie(), bucketStart: hourStart, interval: hourInterval)
         async let basalKcalQ = querySumBucketed(.basalEnergyBurned, unit: .kilocalorie(), bucketStart: hourStart, interval: hourInterval)
         async let activeTimeMinQ = querySumBucketed(.appleExerciseTime, unit: .minute(), bucketStart: hourStart, interval: hourInterval)
-        async let distanceTotalM = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: hourStart, interval: hourInterval)
+        async let distanceTotal = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: hourStart, interval: hourInterval)
 
         let hr = await hrStats
         let st = await stepsTotal
         let activeKcal = await activeKcalQ
         let basalKcal = await basalKcalQ
         let exTimeMin = await activeTimeMinQ
-        let dist = await distanceTotalM
+        let dist = await distanceTotal
         let totalKcal: Double? = (activeKcal == nil && basalKcal == nil) ? nil : (activeKcal ?? 0) + (basalKcal ?? 0)
 
         if hr.avg == nil && st == nil && totalKcal == nil {
@@ -255,10 +255,10 @@ final class HealthKitClient: @unchecked Sendable {
             heartRateMin: hr.min,
             heartRateMax: hr.max,
             stepsTotal: st.map { Int($0) },
-            caloriesTotalKcal: totalKcal,
-            caloriesActiveTotalKcal: activeKcal,
-            activeTimeTotalMin: exTimeMin.map { Int($0) },
-            distanceTotalM: dist
+            caloriesTotal: totalKcal,
+            caloriesActiveTotal: activeKcal,
+            activeTimeTotal: exTimeMin.map { Int($0) },
+            distanceTotal: dist
         )
         return HealthRecord(
             dataType: Self.dataTypeHourlySummary,
@@ -283,20 +283,20 @@ final class HealthKitClient: @unchecked Sendable {
         async let caloriesActive = querySumBucketed(.activeEnergyBurned, unit: .kilocalorie(), bucketStart: dayStart, interval: dayInterval)
         async let caloriesBasal = querySumBucketed(.basalEnergyBurned, unit: .kilocalorie(), bucketStart: dayStart, interval: dayInterval)
         async let activeTimeMin = querySumBucketed(.appleExerciseTime, unit: .minute(), bucketStart: dayStart, interval: dayInterval)
-        async let distanceTotalM = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: dayStart, interval: dayInterval)
+        async let distanceTotal = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: dayStart, interval: dayInterval)
 
         let hr = await hrStats
         let st = await stepsTotal
         let activeKcal = await caloriesActive
         let basalKcal = await caloriesBasal
         let exTimeMin = await activeTimeMin
-        let dist = await distanceTotalM
+        let dist = await distanceTotal
         // total = active + basal (둘 중 하나만 있으면 그것만, 둘 다 nil 이면 nil)
         let totalKcal: Double? = (activeKcal == nil && basalKcal == nil) ? nil : (activeKcal ?? 0) + (basalKcal ?? 0)
 
         let sleepSessions = await queryEndedSleepSessions(since: dayStart, to: dayEnd)
         let mainSleep = sleepSessions.max { ($0.endTimestamp - $0.timestamp) < ($1.endTimestamp - $1.timestamp) }
-        let sleepDurationMin = mainSleep.map { Int(($0.endTimestamp - $0.timestamp) / 60000) }
+        let sleepDuration = mainSleep.map { Int(($0.endTimestamp - $0.timestamp) / 60000) }
 
         let exerciseSessions = await queryEndedExerciseSessions(since: dayStart, to: dayEnd)
         let exerciseCount = exerciseSessions.isEmpty ? nil : exerciseSessions.count
@@ -306,7 +306,7 @@ final class HealthKitClient: @unchecked Sendable {
         }
         let exerciseTotalCalories: Double? = exerciseCaloriesList.isEmpty ? nil : exerciseCaloriesList.reduce(0.0, +)
 
-        if hr.avg == nil && st == nil && sleepDurationMin == nil && exerciseCount == nil {
+        if hr.avg == nil && st == nil && sleepDuration == nil && exerciseCount == nil {
             return nil
         }
 
@@ -318,11 +318,11 @@ final class HealthKitClient: @unchecked Sendable {
             heartRateMin: hr.min,
             heartRateMax: hr.max,
             stepsTotal: st.map { Int($0) },
-            caloriesTotalKcal: totalKcal,
-            caloriesActiveTotalKcal: activeKcal,
-            activeTimeTotalMin: exTimeMin.map { Int($0) },
-            distanceTotalM: dist,
-            sleepDurationMin: sleepDurationMin,
+            caloriesTotal: totalKcal,
+            caloriesActiveTotal: activeKcal,
+            activeTimeTotal: exTimeMin.map { Int($0) },
+            distanceTotal: dist,
+            sleepDuration: sleepDuration,
             exerciseCount: exerciseCount,
             exerciseTotalMin: exerciseTotalMin,
             exerciseTotalCalories: exerciseTotalCalories
@@ -576,8 +576,8 @@ final class HealthKitClient: @unchecked Sendable {
                 calories: calories[day],
                 totalFat: totalFat[day],
                 saturatedFat: saturatedFat[day],
-                polysaturatedFat: polyFat[day],
-                monosaturatedFat: monoFat[day],
+                polyunsaturatedFat: polyFat[day],
+                monounsaturatedFat: monoFat[day],
                 transFat: nil,
                 carbohydrate: carbohydrate[day],
                 dietaryFiber: fiber[day],
@@ -672,7 +672,7 @@ final class HealthKitClient: @unchecked Sendable {
     /// 키(신장) — HealthKit `height` 샘플을 **cm** 로 반환 (dataType="height"). Android(UserProfile)와 단위 통일.
     func queryHeight(since: Date, to: Date) async -> [HealthRecord] {
         await queryQuantitySamples(.height, unit: HKUnit.meterUnit(with: .centi), dataType: Self.dataTypeHeight, since: since, to: to) { v, _ in
-            v > 0 ? HeightValue(value: v) : nil
+            v > 0 ? HeightValue(height: v) : nil
         }
     }
 
@@ -1118,10 +1118,10 @@ final class HealthKitClient: @unchecked Sendable {
         let heartRateMin: Int?
         let heartRateMax: Int?
         let stepsTotal: Int?
-        let caloriesTotalKcal: Double?          // total = basal + active
-        let caloriesActiveTotalKcal: Double?    // active 만
-        let activeTimeTotalMin: Int?            // appleExerciseTime 분 합
-        let distanceTotalM: Double?
+        let caloriesTotal: Double?          // total = basal + active
+        let caloriesActiveTotal: Double?    // active 만
+        let activeTimeTotal: Int?            // appleExerciseTime 분 합
+        let distanceTotal: Double?
     }
 
     fileprivate struct WeightValue: Codable {
@@ -1156,8 +1156,8 @@ final class HealthKitClient: @unchecked Sendable {
         let calories: Double?
         let totalFat: Double?
         let saturatedFat: Double?
-        let polysaturatedFat: Double?
-        let monosaturatedFat: Double?
+        let polyunsaturatedFat: Double?
+        let monounsaturatedFat: Double?
         let transFat: Double?
         let carbohydrate: Double?
         let dietaryFiber: Double?
@@ -1185,7 +1185,7 @@ final class HealthKitClient: @unchecked Sendable {
     }
 
     fileprivate struct HeightValue: Codable {
-        let value: Double            // cm
+        let height: Double           // cm
     }
 
     fileprivate struct MedicationValue: Codable {
@@ -1202,11 +1202,11 @@ final class HealthKitClient: @unchecked Sendable {
         let heartRateMin: Int?
         let heartRateMax: Int?
         let stepsTotal: Int?
-        let caloriesTotalKcal: Double?         // total = basal + active
-        let caloriesActiveTotalKcal: Double?   // active 만
-        let activeTimeTotalMin: Int?           // appleExerciseTime 분 합
-        let distanceTotalM: Double?
-        let sleepDurationMin: Int?
+        let caloriesTotal: Double?         // total = basal + active
+        let caloriesActiveTotal: Double?   // active 만
+        let activeTimeTotal: Int?           // appleExerciseTime 분 합
+        let distanceTotal: Double?
+        let sleepDuration: Int?
         let exerciseCount: Int?
         let exerciseTotalMin: Int?
         let exerciseTotalCalories: Double?

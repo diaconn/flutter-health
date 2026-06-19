@@ -237,13 +237,13 @@ class SamsungHealthClient(private val context: Context) {
 
         val hrStats = hrD.await()
         val stepsTotal = stD.await()
-        val caloriesTotalKcal = caD.await()
-        val caloriesActiveTotalKcal = caaD.await()
-        val activeTimeTotalMin = atD.await()
-        val distanceTotalM = diD.await()
+        val caloriesTotal = caD.await()
+        val caloriesActiveTotal = caaD.await()
+        val activeTimeTotal = atD.await()
+        val distanceTotal = diD.await()
 
-        if (hrStats.avg == null && stepsTotal == null && caloriesTotalKcal == null &&
-            caloriesActiveTotalKcal == null && activeTimeTotalMin == null && distanceTotalM == null) {
+        if (hrStats.avg == null && stepsTotal == null && caloriesTotal == null &&
+            caloriesActiveTotal == null && activeTimeTotal == null && distanceTotal == null) {
             return@coroutineScope null
         }
 
@@ -263,10 +263,10 @@ class SamsungHealthClient(private val context: Context) {
                 heartRateMin = hrStats.min,
                 heartRateMax = hrStats.max,
                 stepsTotal = stepsTotal,
-                caloriesTotalKcal = caloriesTotalKcal,
-                caloriesActiveTotalKcal = caloriesActiveTotalKcal,
-                activeTimeTotalMin = activeTimeTotalMin,
-                distanceTotalM = distanceTotalM
+                caloriesTotal = caloriesTotal,
+                caloriesActiveTotal = caloriesActiveTotal,
+                activeTimeTotal = activeTimeTotal,
+                distanceTotal = distanceTotal
             )),
             createdAt = System.currentTimeMillis(),
         )
@@ -295,15 +295,15 @@ class SamsungHealthClient(private val context: Context) {
 
         val hrStats = hrD.await()
         val stepsTotal = stD.await()
-        val caloriesTotalKcal = caD.await()
-        val caloriesActiveTotalKcal = caaD.await()
-        val activeTimeTotalMin = atD.await()
-        val distanceTotalM = diD.await()
+        val caloriesTotal = caD.await()
+        val caloriesActiveTotal = caaD.await()
+        val activeTimeTotal = atD.await()
+        val distanceTotal = diD.await()
         val sleepSessions = sleepD.await()
         val exerciseSessions = exerciseD.await()
 
         val mainSleep = sleepSessions.maxByOrNull { it.endTimestamp - it.timestamp }
-        val sleepDurationMin = mainSleep?.let { (it.endTimestamp - it.timestamp) / 60000 }?.toInt()
+        val sleepDuration = mainSleep?.let { (it.endTimestamp - it.timestamp) / 60000 }?.toInt()
 
         val exerciseCount = exerciseSessions.size.takeIf { it > 0 }
         val exerciseTotalMin = exerciseSessions.sumOf { (it.endTimestamp - it.timestamp) / 60000 }.toInt().takeIf { it > 0 }
@@ -311,7 +311,7 @@ class SamsungHealthClient(private val context: Context) {
             runCatching { json.decodeFromString<ExerciseValue>(it.valueJson).calories }.getOrNull()
         }.reduceOrNull { acc, d -> acc + d }
 
-        if (hrStats.avg == null && stepsTotal == null && sleepDurationMin == null && exerciseCount == null) {
+        if (hrStats.avg == null && stepsTotal == null && sleepDuration == null && exerciseCount == null) {
             return@coroutineScope null
         }
 
@@ -327,11 +327,11 @@ class SamsungHealthClient(private val context: Context) {
                 heartRateMin = hrStats.min,
                 heartRateMax = hrStats.max,
                 stepsTotal = stepsTotal,
-                caloriesTotalKcal = caloriesTotalKcal,
-                caloriesActiveTotalKcal = caloriesActiveTotalKcal,
-                activeTimeTotalMin = activeTimeTotalMin,
-                distanceTotalM = distanceTotalM,
-                sleepDurationMin = sleepDurationMin,
+                caloriesTotal = caloriesTotal,
+                caloriesActiveTotal = caloriesActiveTotal,
+                activeTimeTotal = activeTimeTotal,
+                distanceTotal = distanceTotal,
+                sleepDuration = sleepDuration,
                 exerciseCount = exerciseCount,
                 exerciseTotalMin = exerciseTotalMin,
                 exerciseTotalCalories = exerciseTotalCalories
@@ -480,8 +480,8 @@ class SamsungHealthClient(private val context: Context) {
             val calories = nf(point, DataType.NutritionType.CALORIES)
             val totalFat = nf(point, DataType.NutritionType.TOTAL_FAT)
             val saturatedFat = nf(point, DataType.NutritionType.SATURATED_FAT)
-            val polysaturatedFat = nf(point, DataType.NutritionType.POLYSATURATED_FAT)
-            val monosaturatedFat = nf(point, DataType.NutritionType.MONOSATURATED_FAT)
+            val polyunsaturatedFat = nf(point, DataType.NutritionType.POLYSATURATED_FAT)
+            val monounsaturatedFat = nf(point, DataType.NutritionType.MONOSATURATED_FAT)
             val transFat = nf(point, DataType.NutritionType.TRANS_FAT)
             val carbohydrate = nf(point, DataType.NutritionType.CARBOHYDRATE)
             val dietaryFiber = nf(point, DataType.NutritionType.DIETARY_FIBER)
@@ -497,7 +497,7 @@ class SamsungHealthClient(private val context: Context) {
 
             // 19개 영양 필드 중 하나라도 있으면 valid 처리 (비타민 단독 입력 등 케이스 보존).
             val anyField = listOf(
-                mealType, title, calories, totalFat, saturatedFat, polysaturatedFat, monosaturatedFat,
+                mealType, title, calories, totalFat, saturatedFat, polyunsaturatedFat, monounsaturatedFat,
                 transFat, carbohydrate, dietaryFiber, sugar, protein, cholesterol, sodium, potassium,
                 vitaminA, vitaminC, calcium, iron
             ).any { it != null }
@@ -512,7 +512,7 @@ class SamsungHealthClient(private val context: Context) {
                 valueJson = json.encodeToString(NutritionValue(
                     mealType = mealType, title = title, calories = calories,
                     totalFat = totalFat, saturatedFat = saturatedFat,
-                    polysaturatedFat = polysaturatedFat, monosaturatedFat = monosaturatedFat,
+                    polyunsaturatedFat = polyunsaturatedFat, monounsaturatedFat = monounsaturatedFat,
                     transFat = transFat, carbohydrate = carbohydrate, dietaryFiber = dietaryFiber,
                     sugar = sugar, protein = protein, cholesterol = cholesterol,
                     sodium = sodium, potassium = potassium,
@@ -573,7 +573,7 @@ class SamsungHealthClient(private val context: Context) {
                     tzOffset = tz,
                     source = SOURCE,
                     // Samsung UserProfile.HEIGHT 는 cm (실기기 검증 2026-06-04, iOS·스키마와 통일).
-                    valueJson = json.encodeToString(HeightValue(value = height.toDouble())),
+                    valueJson = json.encodeToString(HeightValue(height = height.toDouble())),
                     createdAt = now,
                     // UserProfile 은 UserDataPoint(레코드 uid 없는 프로필 값) → uid 미설정(null).
                 )
@@ -820,10 +820,10 @@ class SamsungHealthClient(private val context: Context) {
         val heartRateMin: Int?,
         val heartRateMax: Int?,
         val stepsTotal: Int?,
-        val caloriesTotalKcal: Double?,
-        val caloriesActiveTotalKcal: Double?,
-        val activeTimeTotalMin: Int?,
-        val distanceTotalM: Double?
+        val caloriesTotal: Double?,
+        val caloriesActiveTotal: Double?,
+        val activeTimeTotal: Int?,
+        val distanceTotal: Double?
     )
 
     @Serializable
@@ -848,11 +848,11 @@ class SamsungHealthClient(private val context: Context) {
         val heartRateMin: Int?,
         val heartRateMax: Int?,
         val stepsTotal: Int?,
-        val caloriesTotalKcal: Double?,
-        val caloriesActiveTotalKcal: Double?,
-        val activeTimeTotalMin: Int?,
-        val distanceTotalM: Double?,
-        val sleepDurationMin: Int?,
+        val caloriesTotal: Double?,
+        val caloriesActiveTotal: Double?,
+        val activeTimeTotal: Int?,
+        val distanceTotal: Double?,
+        val sleepDuration: Int?,
         val exerciseCount: Int?,
         val exerciseTotalMin: Int?,
         val exerciseTotalCalories: Double?
@@ -886,8 +886,8 @@ class SamsungHealthClient(private val context: Context) {
         val calories: Double?,
         val totalFat: Double?,
         val saturatedFat: Double?,
-        val polysaturatedFat: Double?,
-        val monosaturatedFat: Double?,
+        val polyunsaturatedFat: Double?,
+        val monounsaturatedFat: Double?,
         val transFat: Double?,
         val carbohydrate: Double?,
         val dietaryFiber: Double?,
@@ -907,7 +907,7 @@ class SamsungHealthClient(private val context: Context) {
 
 
     @Serializable
-    private data class HeightValue(val value: Double)
+    private data class HeightValue(val height: Double)
 
     companion object {
         // 격자 버킷 크기 (heart_rate_interval·steps_interval·distance_interval·calories_interval 공통).
