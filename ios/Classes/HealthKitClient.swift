@@ -144,7 +144,11 @@ final class HealthKitClient: @unchecked Sendable {
 
     func queryEndedSleepSessions(since: Date, to: Date) async -> [HealthRecord] {
         guard HKObjectType.categoryType(forIdentifier: .sleepAnalysis) != nil else { return [] }
-        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
+        // 조회 시작을 1일 앞당겨 세션 앞부분 구간까지 확보해 session.start 를 안정화한다(Android queryEndedSleepSessions 동형).
+        // 슬라이딩 36h 창의 since 에 그대로 묶이면 재조회 때마다 since 가 그 밤의 세그먼트 경계를 넘어 세션 start 가 잘리고,
+        // 같은 밤이 매번 다른 start_dttm 으로 적재돼 UNIQUE(member,'SLEEP',start_dttm) dedup 을 빠져나가 중복 행이 생긴다.
+        let fetchSince = Calendar.current.date(byAdding: .day, value: -1, to: since) ?? since
+        let predicate = HKQuery.predicateForSamples(withStart: fetchSince, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
@@ -152,10 +156,14 @@ final class HealthKitClient: @unchecked Sendable {
         guard let samples = try? await descriptor.result(for: store) else { return [] }
         let sessions = groupSleepSessions(samples: samples)
         let tz = currentTzOffset()
+        let sinceMs = toMs(since)
+        let toMsBound = toMs(to)
         // 최신순(내림차순) 출력 — 그룹핑은 내부에서 시간순으로 처리되므로 여기서 종료 후 정렬.
         return sessions.sorted { $0.start > $1.start }.compactMap { session in
             let startMs = toMs(session.start)
             let endMs = toMs(session.end)
+            // 1일 패딩으로 끌어온 더 과거 세션은 제외 — 원래 요청 창(since~to)에 "종료된" 세션만 emit(Android .filter{endTimestamp in since..to} 동형).
+            guard endMs >= sinceMs && endMs <= toMsBound else { return nil }
             let durationMin = Int((endMs - startMs) / 60000)
             guard durationMin > 0 else { return nil }
             let value = SleepValue(durationMin: durationMin)
@@ -805,6 +813,8 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .bloodGlucose)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)!,
+        // ⚠️ 혈압 correlation 타입(.bloodPressure)은 requestAuthorization read set 에 넣으면 런타임 크래시한다 —
+        //    권한 요청은 위 컴포넌트(systolic/diastolic)로만, correlation 은 조회(HKCorrelationQuery)용. (2026-06-22 실측 확인)
         HKObjectType.quantityType(forIdentifier: .insulinDelivery)!,   // 인슐린 투여(iOS) — read set 누락으로 미수집되던 것 추가
         HKObjectType.quantityType(forIdentifier: .dietaryWater)!,
         // 영양(nutrition) 세부 영양소
