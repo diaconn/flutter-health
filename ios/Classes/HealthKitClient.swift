@@ -346,58 +346,20 @@ final class HealthKitClient: @unchecked Sendable {
         )
     }
 
+    /// 체중·체성분 — HealthKit 원천과 1:1. 체중은 weight 타입, BMI·체지방률·제지방량·허리둘레는
+    /// 각자 독립 타입으로 per-sample 적재. 5종 동시 조회(직렬 대기 방지).
     func queryWeights(since: Date, to: Date) async -> [HealthRecord] {
-        guard let qt = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return [] }
-        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
-        )
-        // .bodyMass·.bodyMassIndex·.bodyFatPercentage 는 별개 샘플 → 독립 쿼리 3건을 동시 실행(직렬 대기 방지) 후 측정일(로컬)로 매칭.
-        async let samplesResult = descriptor.result(for: store)
-        async let bmiTask = fetchQuantityByDay(.bodyMassIndex, unit: .count(), since: since, to: to)
-        async let bodyFatTask = fetchQuantityByDay(.bodyFatPercentage, unit: .percent(), since: since, to: to, scale: 100)
-        guard let samples = try? await samplesResult else { return [] }
-        let bmiByDay = await bmiTask
-        let bodyFatByDay = await bodyFatTask
-        let tz = currentTzOffset()
-        let now = toMs(Date())
-        let cal = Calendar.current
-        return samples.compactMap { sample in
-            let kg = sample.quantity.doubleValue(for: weightUnit)
-            guard kg > 0 else { return nil }
-            let day = cal.startOfDay(for: sample.startDate)
-            let value = WeightValue(weight: kg, bmi: bmiByDay[day], bodyFat: bodyFatByDay[day])
-            return HealthRecord(
-                dataType: Self.dataTypeWeight,
-                timestamp: toMs(sample.startDate),
-                endTimestamp: toMs(sample.endDate),
-                tzOffset: tz,
-                source: Self.source,
-                valueJson: encodeToJson(value),
-                createdAt: now,
-                uid: sample.uuid.uuidString
-            )
-        }
-    }
-
-    /// body composition 보조 측정(BMI·체지방% 등)을 "측정일(로컬) → 값" 맵으로 반환해 weight 샘플에 매칭한다.
-    private func fetchQuantityByDay(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, since: Date, to: Date, scale: Double = 1) async -> [Date: Double] {
-        guard let qt = HKQuantityType.quantityType(forIdentifier: identifier) else { return [:] }
-        // 보조지표(bodyFat·bmi)는 weight 샘플과 '같은 날'로 매칭하므로 조회창을 그 날 시작(자정)부터로 넓힌다.
-        // 5분/증분 창이면 같은 날 입력분을 놓쳐 체성분 facet 이 유실되던 것을 방지(매칭은 여전히 일자 기준).
-        let predicate = HKQuery.predicateForSamples(withStart: Calendar.current.startOfDay(for: since), end: to, options: .strictEndDate)
-        let descriptor = HKSampleQueryDescriptor(
-            predicates: [.quantitySample(type: qt, predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate)]
-        )
-        guard let samples = try? await descriptor.result(for: store) else { return [:] }
-        let cal = Calendar.current
-        var out: [Date: Double] = [:]
-        for s in samples {
-            let v = s.quantity.doubleValue(for: unit) * scale
-            if v > 0 { out[cal.startOfDay(for: s.startDate)] = v }   // 같은 날 여러 건이면 정렬상 뒤(최신)가 덮어씀
-        }
+        async let weight  = queryQuantitySamples(.bodyMass, unit: weightUnit, dataType: Self.dataTypeWeight, since: since, to: to) { kg, _ in kg > 0 ? WeightValue(weight: kg) : nil }
+        async let bmi     = queryQuantitySamples(.bodyMassIndex, unit: .count(), dataType: Self.dataTypeBmi, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "kg/m²") : nil }
+        // bodyFat 은 .percent()=분수(0~1)라 100배해 %.
+        async let bodyFat = queryQuantitySamples(.bodyFatPercentage, unit: .percent(), dataType: Self.dataTypeBodyFatPercentage, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v * 100, unit: "%") : nil }
+        async let lean    = queryQuantitySamples(.leanBodyMass, unit: weightUnit, dataType: Self.dataTypeLeanBodyMass, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "kg") : nil }
+        async let waist   = queryQuantitySamples(.waistCircumference, unit: HKUnit.meterUnit(with: .centi), dataType: Self.dataTypeWaistCircumference, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "cm") : nil }
+        var out = await weight
+        out += await bmi
+        out += await bodyFat
+        out += await lean
+        out += await waist
         return out
     }
 
@@ -520,129 +482,45 @@ final class HealthKitClient: @unchecked Sendable {
     }
 
     func queryNutrition(since: Date, to: Date) async -> [HealthRecord] {
-        // HKCorrelationType.food 는 '앱이 식사로 묶어 저장한 묶음'만 잡아 수동 입력 개별 영양소를 놓친다.
-        // → 영양소별로 일자별 합산(HKStatisticsCollectionQuery)해 하루 1레코드로 반환 (집계라 mealType/title 은 nil).
+        // 원천 1:1 — HealthKit 의 영양소별 개별 샘플을 각자 독립 타입(nutrition_*)으로 per-sample emit (집계/번들 제거).
+        // 건강앱 식이 에너지(섭취 에너지)와 각 영양소는 HealthKit 에서 이미 별개 수량 타입이라, 그대로 1:1 적재한다.
         let kcal = HKUnit.kilocalorie()
         let g = HKUnit.gram()
         let mg = HKUnit.gramUnit(with: .milli)
         let mcg = HKUnit.gramUnit(with: .micro)
-
-        async let caloriesS     = dailyNutrientSeries(.dietaryEnergyConsumed, unit: kcal, since: since, to: to)
-        async let totalFatS     = dailyNutrientSeries(.dietaryFatTotal, unit: g, since: since, to: to)
-        async let saturatedFatS = dailyNutrientSeries(.dietaryFatSaturated, unit: g, since: since, to: to)
-        async let polyFatS      = dailyNutrientSeries(.dietaryFatPolyunsaturated, unit: g, since: since, to: to)
-        async let monoFatS      = dailyNutrientSeries(.dietaryFatMonounsaturated, unit: g, since: since, to: to)
-        async let carbohydrateS = dailyNutrientSeries(.dietaryCarbohydrates, unit: g, since: since, to: to)
-        async let fiberS        = dailyNutrientSeries(.dietaryFiber, unit: g, since: since, to: to)
-        async let sugarS        = dailyNutrientSeries(.dietarySugar, unit: g, since: since, to: to)
-        async let proteinS      = dailyNutrientSeries(.dietaryProtein, unit: g, since: since, to: to)
-        async let cholesterolS  = dailyNutrientSeries(.dietaryCholesterol, unit: mg, since: since, to: to)
-        async let sodiumS       = dailyNutrientSeries(.dietarySodium, unit: mg, since: since, to: to)
-        async let potassiumS    = dailyNutrientSeries(.dietaryPotassium, unit: mg, since: since, to: to)
-        async let vitaminAS     = dailyNutrientSeries(.dietaryVitaminA, unit: mcg, since: since, to: to)
-        async let vitaminCS     = dailyNutrientSeries(.dietaryVitaminC, unit: mg, since: since, to: to)
-        async let calciumS      = dailyNutrientSeries(.dietaryCalcium, unit: mg, since: since, to: to)
-        async let ironS         = dailyNutrientSeries(.dietaryIron, unit: mg, since: since, to: to)
-        async let magnesiumS    = dailyNutrientSeries(.dietaryMagnesium, unit: mg, since: since, to: to)
-        async let caffeineS     = dailyNutrientSeries(.dietaryCaffeine, unit: mg, since: since, to: to)
-        async let vitaminDS     = dailyNutrientSeries(.dietaryVitaminD, unit: mcg, since: since, to: to)
-
-        let calories = await caloriesS
-        let totalFat = await totalFatS
-        let saturatedFat = await saturatedFatS
-        let polyFat = await polyFatS
-        let monoFat = await monoFatS
-        let carbohydrate = await carbohydrateS
-        let fiber = await fiberS
-        let sugar = await sugarS
-        let protein = await proteinS
-        let cholesterol = await cholesterolS
-        let sodium = await sodiumS
-        let potassium = await potassiumS
-        let vitaminA = await vitaminAS
-        let vitaminC = await vitaminCS
-        let calcium = await calciumS
-        let iron = await ironS
-        let magnesium = await magnesiumS
-        let caffeine = await caffeineS
-        let vitaminD = await vitaminDS
-
-        // 데이터가 하나라도 있는 날짜의 합집합
-        var dayKeys = Set<Date>()
-        for m in [calories, totalFat, saturatedFat, polyFat, monoFat, carbohydrate, fiber, sugar,
-                  protein, cholesterol, sodium, potassium, vitaminA, vitaminC, calcium, iron, magnesium, caffeine, vitaminD] {
-            dayKeys.formUnion(m.keys)
-        }
-
-        let tz = currentTzOffset()
-        let now = toMs(Date())
-        let cal = Calendar.current
-        return dayKeys.sorted(by: >).map { day in
-            let value = NutritionValue(
-                mealType: nil,
-                title: nil,
-                calories: calories[day],
-                totalFat: totalFat[day],
-                saturatedFat: saturatedFat[day],
-                polyunsaturatedFat: polyFat[day],
-                monounsaturatedFat: monoFat[day],
-                transFat: nil,
-                carbohydrate: carbohydrate[day],
-                dietaryFiber: fiber[day],
-                sugar: sugar[day],
-                protein: protein[day],
-                cholesterol: cholesterol[day],
-                sodium: sodium[day],
-                potassium: potassium[day],
-                vitaminA: vitaminA[day],
-                vitaminC: vitaminC[day],
-                calcium: calcium[day],
-                iron: iron[day],
-                magnesium: magnesium[day],
-                caffeine: caffeine[day],
-                vitaminD: vitaminD[day]
-            )
-            let dayEnd = cal.date(byAdding: .day, value: 1, to: day).map { toMs($0) - 1 } ?? toMs(day)
-            return HealthRecord(
-                dataType: Self.dataTypeNutrition,
-                timestamp: toMs(day),
-                endTimestamp: dayEnd,
-                tzOffset: tz,
-                source: Self.source,
-                valueJson: encodeToJson(value),
-                createdAt: now
-            )
-        }
-    }
-
-    /// 영양소 한 종류를 [자정 anchored 1일 버킷]으로 합산해 (일자 시작 → 합) 맵으로 반환.
-    /// standalone 샘플을 직접 합산하므로 건강앱 수동 입력도 포착. 합이 0인 날은 제외.
-    private func dailyNutrientSeries(_ id: HKQuantityTypeIdentifier, unit: HKUnit, since: Date, to: Date) async -> [Date: Double] {
-        guard let qt = HKQuantityType.quantityType(forIdentifier: id) else { return [:] }
-        let anchor = Calendar.current.startOfDay(for: since)
-        // 영양은 하루 누적합 → 조회창을 그 날 시작(anchor=자정)부터로 넓혀 부분합(5분/증분 창) 박제를 방지한다.
-        // 한 번의 fetch 가 '그 날 전체 합'을 emit → 서버 do update 가 최신(더 완전한) 합으로 갱신.
-        let predicate = HKQuery.predicateForSamples(withStart: anchor, end: to, options: [])
-        let interval = DateComponents(day: 1)
-        return await withCheckedContinuation { continuation in
-            let query = HKStatisticsCollectionQuery(
-                quantityType: qt,
-                quantitySamplePredicate: predicate,
-                options: .cumulativeSum,
-                anchorDate: anchor,
-                intervalComponents: interval
-            )
-            query.initialResultsHandler = { _, collection, _ in
-                var out: [Date: Double] = [:]
-                collection?.enumerateStatistics(from: anchor, to: to) { stats, _ in
-                    // stats.startDate 는 이미 자정 anchored 버킷 시작 → startOfDay 재계산 불필요(값 동일).
-                    if let s = stats.sumQuantity()?.doubleValue(for: unit), s > 0 {
-                        out[stats.startDate] = s
+        let specs: [(HKQuantityTypeIdentifier, String, HKUnit, String)] = [
+            (.dietaryEnergyConsumed,      "nutrition_energy",        kcal, "kcal"), // 섭취 에너지(Apple "Dietary Energy"). 소모(CALORIES_INTERVAL)와 구분
+            (.dietaryCarbohydrates,       "nutrition_carbohydrate",  g,    "g"),
+            (.dietaryProtein,             "nutrition_protein",       g,    "g"),
+            (.dietaryFatTotal,            "nutrition_fat",           g,    "g"),
+            (.dietaryFatSaturated,        "nutrition_fat_saturated", g,    "g"),
+            (.dietaryFatPolyunsaturated,  "nutrition_fat_poly",      g,    "g"),
+            (.dietaryFatMonounsaturated,  "nutrition_fat_mono",      g,    "g"),
+            (.dietarySugar,               "nutrition_sugar",         g,    "g"),
+            (.dietaryFiber,               "nutrition_fiber",         g,    "g"),
+            (.dietaryCholesterol,         "nutrition_cholesterol",   mg,   "mg"),
+            (.dietarySodium,              "nutrition_sodium",        mg,   "mg"),
+            (.dietaryPotassium,           "nutrition_potassium",     mg,   "mg"),
+            (.dietaryCalcium,             "nutrition_calcium",       mg,   "mg"),
+            (.dietaryIron,                "nutrition_iron",          mg,   "mg"),
+            (.dietaryMagnesium,           "nutrition_magnesium",     mg,   "mg"),
+            (.dietaryCaffeine,            "nutrition_caffeine",      mg,   "mg"),
+            (.dietaryVitaminA,            "nutrition_vitamin_a",     mcg,  "mcg"),
+            (.dietaryVitaminC,            "nutrition_vitamin_c",     mg,   "mg"),
+            (.dietaryVitaminD,            "nutrition_vitamin_d",     mcg,  "mcg"),
+        ]
+        // 영양소별 쿼리를 동시 실행(직렬 대기 방지) — @unchecked Sendable 라 task group 안전. 순서 무관(레코드가 dataType/timestamp 보유).
+        return await withTaskGroup(of: [HealthRecord].self) { group in
+            for (id, dataType, unit, unitLabel) in specs {
+                group.addTask {
+                    await self.queryQuantitySamples(id, unit: unit, dataType: dataType, since: since, to: to) { v, _ in
+                        v > 0 ? QuantitySampleValue(value: v, unit: unitLabel) : nil
                     }
                 }
-                continuation.resume(returning: out)
             }
-            store.execute(query)
+            var out: [HealthRecord] = []
+            for await chunk in group { out += chunk }
+            return out
         }
     }
 
@@ -807,6 +685,8 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .height)!,
         HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)!,
         HKObjectType.quantityType(forIdentifier: .bodyMassIndex)!,
+        HKObjectType.quantityType(forIdentifier: .leanBodyMass)!,        // 제지방량(체성분 — 독립 타입으로 적재)
+        HKObjectType.quantityType(forIdentifier: .waistCircumference)!,  // 허리둘레(체성분 — 독립 타입으로 적재)
         HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
         HKObjectType.workoutType(),
         // 혈당/혈압/수분
@@ -1136,8 +1016,12 @@ final class HealthKitClient: @unchecked Sendable {
 
     fileprivate struct WeightValue: Codable {
         let weight: Double
-        let bmi: Double?
-        let bodyFat: Double?
+    }
+
+    /// 체성분(bmi·체지방률·제지방량·허리둘레)·영양소(nutrition_*) per-sample 공통 값 — 측정값 + 단위.
+    fileprivate struct QuantitySampleValue: Codable {
+        let value: Double
+        let unit: String
     }
 
     fileprivate struct BloodGlucoseValue: Codable {
@@ -1158,31 +1042,6 @@ final class HealthKitClient: @unchecked Sendable {
     fileprivate struct InsulinDeliveryValue: Codable {
         let dose: Double           // IU
         let reason: String?        // "basal" | "bolus" | nil
-    }
-
-    fileprivate struct NutritionValue: Codable {
-        let mealType: String?
-        let title: String?
-        let calories: Double?
-        let totalFat: Double?
-        let saturatedFat: Double?
-        let polyunsaturatedFat: Double?
-        let monounsaturatedFat: Double?
-        let transFat: Double?
-        let carbohydrate: Double?
-        let dietaryFiber: Double?
-        let sugar: Double?
-        let protein: Double?
-        let cholesterol: Double?
-        let sodium: Double?
-        let potassium: Double?
-        let vitaminA: Double?
-        let vitaminC: Double?
-        let calcium: Double?
-        let iron: Double?
-        let magnesium: Double?
-        let caffeine: Double?
-        let vitaminD: Double?
     }
 
     fileprivate struct WaterIntakeValue: Codable {
@@ -1235,10 +1094,13 @@ final class HealthKitClient: @unchecked Sendable {
     static let dataTypeHourlySummary = "hourly_summary"
     static let dataTypeDailySummary = "daily_summary"
     static let dataTypeWeight = "weight"
+    static let dataTypeBmi = "bmi"
+    static let dataTypeBodyFatPercentage = "body_fat_percentage"
+    static let dataTypeLeanBodyMass = "lean_body_mass"
+    static let dataTypeWaistCircumference = "waist_circumference"
     static let dataTypeBloodGlucose = "blood_glucose"
     static let dataTypeBloodPressure = "blood_pressure"
     static let dataTypeInsulinDelivery = "insulin_delivery"
-    static let dataTypeNutrition = "nutrition"
     static let dataTypeWaterIntake = "water_intake"
     static let dataTypeStepSegment = "step_segment"
     static let dataTypeHeight = "height"
