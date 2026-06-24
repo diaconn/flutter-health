@@ -13,11 +13,11 @@ class StepSegmentValue {
 
   factory StepSegmentValue.fromJson(Map<String, dynamic> json) => StepSegmentValue(
         count: (json['count'] as num).toInt(),
-        sourceType: json['sourceType'] as String? ?? 'other',
+        sourceType: json['source_type'] as String? ?? 'other',
       );
 
   Map<String, dynamic> toJson() => {
         'count': count,
-        'sourceType': sourceType,
+        'source_type': sourceType,
       };
 }

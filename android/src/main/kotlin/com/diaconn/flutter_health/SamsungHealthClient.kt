@@ -23,9 +23,11 @@ import com.samsung.android.sdk.health.data.request.LocalTimeGroup
 import com.samsung.android.sdk.health.data.request.LocalTimeGroupUnit
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -586,9 +588,11 @@ class SamsungHealthClient(private val context: Context) {
     @Volatile private var store: HealthDataStore? = null
     // iOS JSONEncoder 가 nil 을 키째로 omit 하는 동작과 통일 (Apple HealthKit/Google Fit/FHIR 권고 동일).
     // 기본 kotlinx.serialization 은 explicitNulls=true 라 `"key": null` 을 명시 출력 → false 로 끔.
+    @OptIn(ExperimentalSerializationApi::class)
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
+        namingStrategy = JsonNamingStrategy.SnakeCase // valueJson 키 snake_case 통일(서버 json_data 스키마 일관)
     }
 
     private fun currentTzOffset(): String =

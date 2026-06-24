@@ -17,15 +17,15 @@ class BloodPressureValue {
         systolic: (json['systolic'] as num).toDouble(),
         diastolic: (json['diastolic'] as num).toDouble(),
         mean: (json['mean'] as num?)?.toDouble(),
-        pulseRate: (json['pulseRate'] as num?)?.toInt(),
-        medicationTaken: json['medicationTaken'] as bool?,
+        pulseRate: (json['pulse_rate'] as num?)?.toInt(),
+        medicationTaken: json['medication_taken'] as bool?,
       );
 
   Map<String, dynamic> toJson() => {
         'systolic': systolic,
         'diastolic': diastolic,
         if (mean != null) 'mean': mean,
-        if (pulseRate != null) 'pulseRate': pulseRate,
-        if (medicationTaken != null) 'medicationTaken': medicationTaken,
+        if (pulseRate != null) 'pulse_rate': pulseRate,
+        if (medicationTaken != null) 'medication_taken': medicationTaken,
       };
 }

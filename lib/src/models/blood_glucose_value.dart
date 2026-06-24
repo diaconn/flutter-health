@@ -6,12 +6,12 @@ class BloodGlucoseSeriesEntry {
 
   factory BloodGlucoseSeriesEntry.fromJson(Map<String, dynamic> json) => BloodGlucoseSeriesEntry(
         glucose: (json['glucose'] as num).toDouble(),
-        timestampMs: (json['timestampMs'] as num).toInt(),
+        timestampMs: (json['timestamp_ms'] as num).toInt(),
       );
 
   Map<String, dynamic> toJson() => {
         'glucose': glucose,
-        'timestampMs': timestampMs,
+        'timestamp_ms': timestampMs,
       };
 }
 
@@ -32,9 +32,9 @@ class BloodGlucoseValue {
 
   factory BloodGlucoseValue.fromJson(Map<String, dynamic> json) => BloodGlucoseValue(
         glucose: (json['glucose'] as num).toDouble(),
-        mealStatus: json['mealStatus'] as String?,
-        insulinInjected: (json['insulinInjected'] as num?)?.toDouble(),
-        medicationTaken: json['medicationTaken'] as bool?,
+        mealStatus: json['meal_status'] as String?,
+        insulinInjected: (json['insulin_injected'] as num?)?.toDouble(),
+        medicationTaken: json['medication_taken'] as bool?,
         series: (json['series'] as List?)
             ?.map((e) => BloodGlucoseSeriesEntry.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -42,9 +42,9 @@ class BloodGlucoseValue {
 
   Map<String, dynamic> toJson() => {
         'glucose': glucose,
-        if (mealStatus != null) 'mealStatus': mealStatus,
-        if (insulinInjected != null) 'insulinInjected': insulinInjected,
-        if (medicationTaken != null) 'medicationTaken': medicationTaken,
+        if (mealStatus != null) 'meal_status': mealStatus,
+        if (insulinInjected != null) 'insulin_injected': insulinInjected,
+        if (medicationTaken != null) 'medication_taken': medicationTaken,
         if (series != null) 'series': series!.map((e) => e.toJson()).toList(),
       };
 }

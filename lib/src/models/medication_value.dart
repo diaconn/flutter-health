@@ -16,18 +16,18 @@ class MedicationValue {
   });
 
   factory MedicationValue.fromJson(Map<String, dynamic> json) => MedicationValue(
-        logStatus: json['logStatus'] as String,
-        scheduleType: json['scheduleType'] as String,
-        doseQuantity: (json['doseQuantity'] as num?)?.toDouble(),
+        logStatus: json['log_status'] as String,
+        scheduleType: json['schedule_type'] as String,
+        doseQuantity: (json['dose_quantity'] as num?)?.toDouble(),
         unit: json['unit'] as String?,
-        scheduledDate: (json['scheduledDate'] as num?)?.toInt(),
+        scheduledDate: (json['scheduled_date'] as num?)?.toInt(),
       );
 
   Map<String, dynamic> toJson() => {
-        'logStatus': logStatus,
-        'scheduleType': scheduleType,
-        if (doseQuantity != null) 'doseQuantity': doseQuantity,
+        'log_status': logStatus,
+        'schedule_type': scheduleType,
+        if (doseQuantity != null) 'dose_quantity': doseQuantity,
         if (unit != null) 'unit': unit,
-        if (scheduledDate != null) 'scheduledDate': scheduledDate,
+        if (scheduledDate != null) 'scheduled_date': scheduledDate,
       };
 }

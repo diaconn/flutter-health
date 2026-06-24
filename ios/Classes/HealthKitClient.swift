@@ -652,8 +652,17 @@ final class HealthKitClient: @unchecked Sendable {
 
     private let store = HKHealthStore()
     private let logger = Logger(subsystem: "com.diaconn.flutter_health", category: "HealthKitClient")
-    private let jsonEncoder = JSONEncoder()
-    private let jsonDecoder = JSONDecoder()
+    // valueJson 키를 snake_case 로 통일(서버 t_health_log json_data 스키마 일관). 인코드/디코드 양방향 동일 전략 → round-trip 안전.
+    private let jsonEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.keyEncodingStrategy = .convertToSnakeCase
+        return e
+    }()
+    private let jsonDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        return d
+    }()
 
     private let hourFormatter: DateFormatter = {
         let f = DateFormatter()

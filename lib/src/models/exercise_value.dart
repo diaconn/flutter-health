@@ -26,7 +26,7 @@ class ExerciseValue {
 
   const ExerciseValue({required this.exerciseType, this.duration, this.calories, this.distance, this.heartRateAvg, this.heartRateMax, this.heartRateMin});
 
-  factory ExerciseValue.fromJson(Map<String, dynamic> json) => ExerciseValue(exerciseType: json['exerciseType'] as String, duration: (json['duration'] as num?)?.toInt(), calories: (json['calories'] as num?)?.toDouble(), distance: (json['distance'] as num?)?.toDouble(), heartRateAvg: (json['heartRateAvg'] as num?)?.toInt(), heartRateMax: (json['heartRateMax'] as num?)?.toInt(), heartRateMin: (json['heartRateMin'] as num?)?.toInt());
+  factory ExerciseValue.fromJson(Map<String, dynamic> json) => ExerciseValue(exerciseType: json['exercise_type'] as String, duration: (json['duration'] as num?)?.toInt(), calories: (json['calories'] as num?)?.toDouble(), distance: (json['distance'] as num?)?.toDouble(), heartRateAvg: (json['heart_rate_avg'] as num?)?.toInt(), heartRateMax: (json['heart_rate_max'] as num?)?.toInt(), heartRateMin: (json['heart_rate_min'] as num?)?.toInt());
 
-  Map<String, dynamic> toJson() => {'exerciseType': exerciseType, if (duration != null) 'duration': duration, if (calories != null) 'calories': calories, if (distance != null) 'distance': distance, if (heartRateAvg != null) 'heartRateAvg': heartRateAvg, if (heartRateMax != null) 'heartRateMax': heartRateMax, if (heartRateMin != null) 'heartRateMin': heartRateMin};
+  Map<String, dynamic> toJson() => {'exercise_type': exerciseType, if (duration != null) 'duration': duration, if (calories != null) 'calories': calories, if (distance != null) 'distance': distance, if (heartRateAvg != null) 'heart_rate_avg': heartRateAvg, if (heartRateMax != null) 'heart_rate_max': heartRateMax, if (heartRateMin != null) 'heart_rate_min': heartRateMin};
 }
