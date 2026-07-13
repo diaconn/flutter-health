@@ -95,6 +95,11 @@ class MockFlutterHealthPlatform
   @override
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>
       Future.value([]);
+
+  @override
+  Future<HealthChanges> queryChanges(String dataType,
+          {DateTime? since, DateTime? to, String? token}) =>
+      Future.value(const HealthChanges(upserted: [], deletedUids: []));
 }
 
 void main() {

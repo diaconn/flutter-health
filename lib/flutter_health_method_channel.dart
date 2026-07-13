@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 import 'flutter_health_platform_interface.dart';
 import 'src/models/health_record.dart';
+import 'src/models/health_changes.dart';
 
 class MethodChannelFlutterHealth extends FlutterHealthPlatform {
   final methodChannel = const MethodChannel('flutter_health');
@@ -113,6 +114,22 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
   @override
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>
       _queryList('queryMedication', since, to);
+
+  @override
+  Future<HealthChanges> queryChanges(String dataType, {DateTime? since, DateTime? to, String? token}) async {
+    final Map? result;
+    try {
+      result = await methodChannel.invokeMethod<Map>('queryChanges', {
+        'dataType': dataType,
+        'since': since?.millisecondsSinceEpoch,
+        'to': to?.millisecondsSinceEpoch,
+        'token': token,
+      });
+    } on MissingPluginException {
+      return const HealthChanges(upserted: [], deletedUids: []);
+    }
+    return result == null ? const HealthChanges(upserted: [], deletedUids: []) : HealthChanges.fromMap(result);
+  }
 
   /// 채널 결과를 HealthRecord 리스트로 변환하고 timestamp 내림차순(최신 먼저)으로 정렬해 반환.
   /// 모든 list 쿼리(_queryList)의 공통 반환 — 컨슈머는 항상 최신 데이터부터 받는다.

@@ -648,6 +648,79 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
+    // MARK: - 변경 피드 (수정/삭제)
+
+    /// HKAnchoredObjectQuery 로 변경 피드(추가 샘플 + 삭제 객체 UUID + 다음 anchor)를 받는다.
+    ///
+    /// - anchorToken(base64) 이 있으면 그 시점 이후 **델타만**(추가/삭제), 없으면 since~to 범위 전량이 기준선.
+    /// - HealthKit 의 "수정"은 구 uuid 삭제 + 신 uuid 추가로 오므로, 수정 시 신규는 upserted, 구본은 deletedUids 에 나온다.
+    /// - deletedObjects 는 anchor 확립 이후 삭제분만 잡히므로 반드시 (기준선 호출 → 편집/삭제 → 재호출) 순서로 검증.
+    func queryChanges(dataType: String, since: Date, to: Date, anchorToken: String?) async -> (upserted: [HealthRecord], deletedUids: [String], token: String?) {
+        guard let sampleType = Self.sampleType(forDataType: dataType) else { return ([], [], nil) }
+        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: [])
+        let anchor = anchorToken.flatMap { Self.decodeAnchor($0) }
+        // 1) 앵커드 쿼리로 raw 결과(추가 샘플·삭제 uuid·다음 anchor) 수집. 핸들러가 비동기 컨텍스트가 아니라 여기서 raw 만 꺼낸다.
+        let (added, deletedUids, token): ([HKSample], [String], String?) = await withCheckedContinuation { continuation in
+            let query = HKAnchoredObjectQuery(type: sampleType, predicate: predicate, anchor: anchor, limit: HKObjectQueryNoLimit) { _, addedSamples, deletedObjects, newAnchor, _ in
+                let uids = (deletedObjects ?? []).map { $0.uuid.uuidString }
+                let tk = newAnchor.flatMap { Self.encodeAnchor($0) }
+                continuation.resume(returning: (addedSamples ?? [], uids, tk))
+            }
+            self.store.execute(query)
+        }
+        // 2) 추가 샘플 → HealthRecord. 운동은 기존 빌더 재사용(값 완전), 그 외는 최소 레코드(uid+시각+원본값).
+        let tz = currentTzOffset()
+        let now = toMs(Date())
+        var records: [HealthRecord] = []
+        for sample in added {
+            if let workout = sample as? HKWorkout {
+                if let r = await buildExerciseRecord(workout, tz: tz) { records.append(r) }
+            } else if let r = buildChangeRecord(sample, dataType: dataType, tz: tz, now: now) {
+                records.append(r)
+            }
+        }
+        return (records.sorted { $0.timestamp > $1.timestamp }, deletedUids, token)
+    }
+
+    /// 변경 피드 dataType → 앵커드 쿼리용 HKSampleType 매핑(지원 대상 타입만).
+    private static func sampleType(forDataType dataType: String) -> HKSampleType? {
+        switch dataType {
+        case dataTypeSleep:         return HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
+        case dataTypeExercise:      return HKObjectType.workoutType()
+        case dataTypeWeight:        return HKObjectType.quantityType(forIdentifier: .bodyMass)
+        case dataTypeBloodGlucose:  return HKObjectType.quantityType(forIdentifier: .bloodGlucose)
+        case dataTypeWaterIntake:   return HKObjectType.quantityType(forIdentifier: .dietaryWater)
+        case dataTypeBloodPressure: return HKObjectType.correlationType(forIdentifier: .bloodPressure)
+        // 영양은 섭취 에너지(대표 1종)로 처리 — 실제로는 영양소별 개별 샘플이라 각자 uid 를 가진다.
+        case "nutrition", "nutrition_energy": return HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)
+        default: return nil
+        }
+    }
+
+    /// 운동 외 샘플을 최소 레코드로 변환(uid + 시작/종료 + 원본값 요약). 값 완전성보다 uid·변경신호 식별이 목적.
+    private func buildChangeRecord(_ sample: HKSample, dataType: String, tz: String, now: Int64) -> HealthRecord? {
+        let start = toMs(sample.startDate)
+        let end = toMs(sample.endDate)
+        var valueJson = "{}"
+        if let cat = sample as? HKCategorySample {
+            // 수면 등 카테고리 — 세션 병합 전 raw 조각(단계값+지속분)이 그대로 노출됨.
+            valueJson = encodeToJson(ChangeCategoryValue(categoryValue: cat.value, durationMin: Int((end - start) / 60000)))
+        } else if let q = sample as? HKQuantitySample {
+            // 수량 — 단위 불일치 크래시 방지를 위해 HKQuantity.description(예 "72 count/min")을 그대로 담는다.
+            valueJson = encodeToJson(ChangeQuantityValue(quantity: q.quantity.description))
+        }
+        return HealthRecord(dataType: dataType, timestamp: start, endTimestamp: end, tzOffset: tz, source: Self.source, valueJson: valueJson, createdAt: now, uid: sample.uuid.uuidString)
+    }
+
+    /// HKQueryAnchor ↔ base64 문자열(Dart 왕복용). NSSecureCoding 아카이빙.
+    private static func encodeAnchor(_ anchor: HKQueryAnchor) -> String? {
+        (try? NSKeyedArchiver.archivedData(withRootObject: anchor, requiringSecureCoding: true))?.base64EncodedString()
+    }
+    private static func decodeAnchor(_ token: String) -> HKQueryAnchor? {
+        guard let data = Data(base64Encoded: token) else { return nil }
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+    }
+
     // MARK: - Private
 
     private let store = HKHealthStore()
@@ -1072,6 +1145,17 @@ final class HealthKitClient: @unchecked Sendable {
         let doseQuantity: Double?
         let unit: String?
         let scheduledDate: Int64?
+    }
+
+    /// 변경 피드 — 카테고리(수면 등) raw 조각 값.
+    private struct ChangeCategoryValue: Codable {
+        let categoryValue: Int
+        let durationMin: Int
+    }
+
+    /// 변경 피드 — 수량 샘플 원본값 문자열(단위 포함).
+    private struct ChangeQuantityValue: Codable {
+        let quantity: String
     }
 
     private struct DailySummaryValue: Codable {

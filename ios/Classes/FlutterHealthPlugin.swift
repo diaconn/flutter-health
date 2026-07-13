@@ -192,6 +192,27 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
             }
 
+        case "queryChanges":
+            guard let args     = call.arguments as? [String: Any],
+                  let dataType = args["dataType"] as? String else {
+                result(FlutterError(code: "INVALID_ARGS", message: "dataType required", details: nil))
+                return
+            }
+            // since/to 는 기준선(첫 호출) predicate 범위. 미지정 시 최근 7일.
+            let now   = Date()
+            let since = (args["since"] as? Int).map { Date(timeIntervalSince1970: Double($0) / 1000.0) } ?? now.addingTimeInterval(-7 * 24 * 3600)
+            let to    = (args["to"]    as? Int).map { Date(timeIntervalSince1970: Double($0) / 1000.0) } ?? now
+            let token = args["token"] as? String
+            Task {
+                let (recs, deleted, newToken) = await client.queryChanges(dataType: dataType, since: since, to: to, anchorToken: token)
+                var out: [String: Any] = [
+                    "upserted": recs.map { $0.toDictionary() },
+                    "deletedUids": deleted,
+                ]
+                if let newToken = newToken { out["token"] = newToken }
+                DispatchQueue.main.async { result(out) }
+            }
+
         default:
             result(FlutterMethodNotImplemented)
         }

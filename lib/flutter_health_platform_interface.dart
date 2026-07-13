@@ -2,6 +2,7 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_health_method_channel.dart';
 import 'src/models/health_record.dart';
+import 'src/models/health_changes.dart';
 
 abstract class FlutterHealthPlatform extends PlatformInterface {
   FlutterHealthPlatform() : super(token: _token);
@@ -50,4 +51,6 @@ abstract class FlutterHealthPlatform extends PlatformInterface {
   /// 키(신장, cm). iOS=HealthKit height 샘플 / Android=Samsung UserProfile 현재 키 1건.
   Future<List<HealthRecord>> queryHeight(DateTime since, DateTime to) => throw UnimplementedError();
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) => throw UnimplementedError();
+  /// 변경 피드(추가·수정·삭제). iOS=HKAnchoredObjectQuery(anchor 델타) / Android=readChanges(변경시각 창).
+  Future<HealthChanges> queryChanges(String dataType, {DateTime? since, DateTime? to, String? token}) => throw UnimplementedError();
 }

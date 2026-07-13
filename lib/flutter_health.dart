@@ -1,4 +1,5 @@
 export 'src/models/health_record.dart';
+export 'src/models/health_changes.dart';
 export 'src/models/heart_rate_interval_value.dart';
 export 'src/models/steps_interval_value.dart';
 export 'src/models/distance_interval_value.dart';
@@ -20,6 +21,7 @@ export 'src/models/medication_value.dart';
 
 import 'flutter_health_platform_interface.dart';
 import 'src/models/health_record.dart';
+import 'src/models/health_changes.dart';
 
 class FlutterHealth {
   /// 삼성헬스(Android) / Apple Health(iOS) 가용성 확인.
@@ -117,4 +119,17 @@ class FlutterHealth {
   /// [since]~[to] 구간 복약 이벤트 (medication, iOS 26+) 목록. 그 외 플랫폼/버전은 빈 리스트.
   Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryMedication(since, to);
+
+  /// [dataType] 의 변경 피드(추가·수정·삭제)를 반환. 삼성헬스/HealthKit 의 신규·편집·삭제를 소스와 1:1로 반영하기 위한 경로.
+  ///
+  /// - `upserted`: 신규 **또는** 수정된 레코드(각 uid 포함). 순수 추가면 `deletedUids` 는 비고, 수정이면 구 uid 가 `deletedUids` 에 함께 옴.
+  /// - `deletedUids`: 삭제된(또는 수정으로 대체된 구버전) 레코드의 uid.
+  /// - 증분(cursor) 사용법:
+  ///   - iOS: 반환된 [HealthChanges.token](anchor)을 저장 → 다음 호출에 [token] 으로 넘기면 그 이후 델타만.
+  ///   - Android: [since]~[to] 변경시각 창. 다음 증분은 [since]=직전 [to] 로 호출(내부에서 전 페이지 소진 → 반환 token 은 항상 null).
+  ///
+  /// 지원 [dataType]: `sleep`·`exercise`·`nutrition`·`blood_glucose`·`blood_pressure`·`weight`·`water_intake` (그 외는 빈 결과).
+  /// 단, 실제 소비는 세션·다건 편집 이슈가 있는 `sleep`·`exercise`·`nutrition` 3종만 변경 피드로 쓰고, 나머지 4종은 API 지원만 하고 일반 조회를 사용한다.
+  Future<HealthChanges> queryChanges(String dataType, {DateTime? since, DateTime? to, String? token}) =>
+      FlutterHealthPlatform.instance.queryChanges(dataType, since: since, to: to, token: token);
 }

@@ -9,6 +9,7 @@ import com.samsung.android.sdk.health.data.HealthDataService
 import com.samsung.android.sdk.health.data.HealthDataStore
 import com.samsung.android.sdk.health.data.data.AggregateOperation
 import com.samsung.android.sdk.health.data.data.AggregatedData
+import com.samsung.android.sdk.health.data.data.ChangeType
 import com.samsung.android.sdk.health.data.data.HealthDataPoint
 import com.samsung.android.sdk.health.data.data.entries.ExerciseSession
 import com.samsung.android.sdk.health.data.permission.AccessType
@@ -583,6 +584,48 @@ class SamsungHealthClient(private val context: Context) {
         }.onFailure { Log.e(TAG, "키(프로필) 조회 실패", it) }.getOrDefault(emptyList())
     }
 
+    /**
+     * 변경 피드(추가·수정·삭제)를 반환한다. 앱 편집·삭제를 소스와 1:1로 반영하기 위한 경로.
+     *
+     * `store.readChanges` 로 [dataType] 의 변경분을 받아 UPSERT(신규·수정)/DELETE(삭제·구버전)로 분류한다.
+     * - [since]~[to] = **변경시각(changeTime)** 창(데이터 자체 시각이 아니라 편집/삭제가 일어난 시각).
+     *   증분 동기화 시 [since]=마지막 동기화 시각을 넘겨 그 이후 변경만 받는다(Android는 SDK에 별도 sync 커서가 없음).
+     * - [pageToken] = 이어받을 시작 페이지(보통 null). **응답이 여러 페이지면 내부에서 전부 소진**해 누락 없이 모아 반환한다
+     *   → 반환 [ChangeResult.pageToken] 은 항상 null(전량 소진). 안전상 [MAX_CHANGE_PAGES] 페이지까지만.
+     * - 세션형(sleep/exercise)은 기존 빌더로 완전한 레코드, 그 외는 uid+시각(+영양 title) 최소 레코드로 반환.
+     */
+    suspend fun queryChanges(dataType: String, since: Long, to: Long, pageToken: String?): ChangeResult {
+        val s = store ?: return ChangeResult(emptyList(), emptyList(), null)
+        val readable = changeReadableFor(dataType) ?: return ChangeResult(emptyList(), emptyList(), null)
+        return runCatching {
+            val filter = InstantTimeFilter.of(Instant.ofEpochMilli(since), Instant.ofEpochMilli(to))
+            val upserted = mutableListOf<HealthRecord>()
+            val deleted = mutableListOf<String>()
+            var nextToken: String? = pageToken
+            var pages = 0
+            do {
+                // changedDataRequestBuilder 는 매 호출 새 빌더를 반환 → 페이지마다 새로 만들어 pageToken 만 교체.
+                val builder = readable.changedDataRequestBuilder.setChangeTimeFilter(filter)
+                nextToken?.let { builder.setPageToken(it) }
+                val response = s.readChanges(builder.build())
+                response.dataList.forEach { change ->
+                    when (change.changeType) {
+                        ChangeType.UPSERT -> change.upsertDataPoint?.let { p ->
+                            buildChangeRecord(dataType, p)?.let { upserted.add(it) }
+                        }
+                        ChangeType.DELETE -> change.deleteDataUid?.let { deleted.add(it) }
+                    }
+                }
+                nextToken = response.pageToken
+                pages++
+            } while (nextToken != null && pages < MAX_CHANGE_PAGES)
+            if (nextToken != null) Log.w(TAG, "변경 피드 페이지 상한($MAX_CHANGE_PAGES) 도달 — 잔여 페이지 있음($dataType)")
+            // 전량 소진 → 반환 token=null. 다음 증분 조회는 since=이번 to 로 호출.
+            ChangeResult(upserted.sortedByDescending { it.timestamp }, deleted, null)
+        }.onFailure { Log.e(TAG, "변경 피드 조회 실패($dataType)", it) }
+            .getOrDefault(ChangeResult(emptyList(), emptyList(), null))
+    }
+
     // --- Private ---
 
     @Volatile private var store: HealthDataStore? = null
@@ -775,6 +818,38 @@ class SamsungHealthClient(private val context: Context) {
         else -> type.name.lowercase()
     }
 
+    /** 변경 피드 dataType → ChangeReadable DataType 매핑(지원 대상 타입만). */
+    private fun changeReadableFor(dataType: String): DataType.ChangeReadable<HealthDataPoint>? = when (dataType) {
+        DATA_TYPE_SLEEP -> DataTypes.SLEEP
+        DATA_TYPE_EXERCISE -> DataTypes.EXERCISE
+        DATA_TYPE_NUTRITION -> DataTypes.NUTRITION
+        DATA_TYPE_BLOOD_GLUCOSE -> DataTypes.BLOOD_GLUCOSE
+        DATA_TYPE_BLOOD_PRESSURE -> DataTypes.BLOOD_PRESSURE
+        DATA_TYPE_WEIGHT -> DataTypes.BODY_COMPOSITION
+        DATA_TYPE_WATER_INTAKE -> DataTypes.WATER_INTAKE
+        else -> null
+    }
+
+    /** 변경 피드 UPSERT 데이터포인트 → HealthRecord. 세션형은 완전한 빌더 재사용, 그 외는 최소 레코드. */
+    private fun buildChangeRecord(dataType: String, point: HealthDataPoint): HealthRecord? = when (dataType) {
+        DATA_TYPE_SLEEP -> buildSleepRecord(point)
+        DATA_TYPE_EXERCISE -> buildExerciseRecord(point)
+        else -> {
+            // 값 완전성보다 uid·변경신호 확인이 목적 — uid+시각, 영양만 어느 음식인지 알 수 있게 title/mealType/kcal 부가.
+            val startMs = point.startTime?.toEpochMilli() ?: return null
+            val endMs = point.endTime?.toEpochMilli() ?: startMs
+            val valueJson = if (dataType == DATA_TYPE_NUTRITION) {
+                json.encodeToString(ChangeMinimalValue(
+                    mealType = runCatching { point.getValue(DataType.NutritionType.MEAL_TYPE) }
+                        .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase(),
+                    title = runCatching { point.getValue(DataType.NutritionType.TITLE) }.getOrNull(),
+                    calories = nf(point, DataType.NutritionType.CALORIES)
+                ))
+            } else "{}"
+            HealthRecord(dataType, startMs, endMs, currentTzOffset(), SOURCE, valueJson, System.currentTimeMillis(), uid = point.uid)
+        }
+    }
+
     // --- valueJson 직렬화용 내부 데이터 클래스 ---
 
     /** 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate_interval). */
@@ -913,7 +988,17 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class HeightValue(val height: Double)
 
+    /** 변경 피드 조회 결과 홀더(플러그인 채널로 넘길 원자료). */
+    data class ChangeResult(val upserted: List<HealthRecord>, val deleted: List<String>, val pageToken: String?)
+
+    /** 변경 피드 최소 값(영양은 어느 음식인지 식별). */
+    @Serializable
+    private data class ChangeMinimalValue(val mealType: String?, val title: String?, val calories: Double?)
+
     companion object {
+        // 변경 피드(readChanges) 페이지 소진 상한 — 무한 루프 방지용 안전장치.
+        private const val MAX_CHANGE_PAGES = 100
+
         // 격자 버킷 크기 (heart_rate_interval·steps_interval·distance_interval·calories_interval 공통).
         const val BUCKET_MIN = 10
         const val BUCKET_MS = BUCKET_MIN * 60 * 1000L

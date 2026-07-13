@@ -190,6 +190,29 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                      .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }
             }
+            "queryChanges" -> {
+                val dataType = call.argument<String>("dataType")
+                if (dataType == null) {
+                    result.error("INVALID_ARGS", "dataType is required", null)
+                    return
+                }
+                val now = System.currentTimeMillis()
+                // since/to = 변경시각 창. 미지정 시 최근 7일.
+                val since = call.argument<Number>("since")?.toLong() ?: (now - 7L * 24 * 3600 * 1000)
+                val to = call.argument<Number>("to")?.toLong() ?: now
+                val token = call.argument<String>("token")
+                scope.launch {
+                    runCatching {
+                        val res = client.queryChanges(dataType, since, to, token)
+                        val out = HashMap<String, Any?>()
+                        out["upserted"] = res.upserted.map { it.toMap() }
+                        out["deletedUids"] = res.deleted
+                        out["token"] = res.pageToken
+                        out
+                    }.onSuccess { result.success(it) }
+                     .onFailure { result.error("QUERY_ERROR", it.message, null) }
+                }
+            }
             else -> result.notImplemented()
         }
     }
