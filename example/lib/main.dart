@@ -163,10 +163,8 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         'blood_glucose' => await _plugin.queryBloodGlucose(since, to),
         'blood_pressure' => await _plugin.queryBloodPressure(since, to),
         'insulin_delivery' => await _plugin.queryInsulinDelivery(since, to), // iOS 전용
-        'medication' => await _plugin.queryMedication(since, to), // iOS 전용 (iOS 26+)
         'nutrition' => await _plugin.queryNutrition(since, to),
         'water_intake' => await _plugin.queryWaterIntake(since, to),
-        'step_segment' => await _plugin.queryStepSegments(since, to), // iOS 전용 (Android 미지원 → 빈 리스트)
         'height' => await _plugin.queryHeight(since, to), // iOS=HealthKit 샘플 / Android=UserProfile (cm)
         _ => <HealthRecord>[],
       };
@@ -394,11 +392,11 @@ class _ButtonGrid extends StatelessWidget {
           _section('연결 · 권한', [FilledButton(onPressed: onConnect, child: const Text('Connect')), FilledButton(onPressed: onRequestPermission, child: const Text('Request Permission')), FilledButton.tonal(onPressed: onToggleLoop, child: Text(loopRunning ? 'Stop 10-min Loop' : 'Start 10-min Loop'))]),
           // metric 해체 → 10분 격자 버킷 타입 각각 버튼화 (최근 1시간 조회).
           _section('10분 격자 지표', [OutlinedButton(onPressed: () => onQueryInterval('heart_rate_interval'), child: const Text('심박수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('steps_interval'), child: const Text('걸음 수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('distance_interval'), child: const Text('이동 거리 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('calories_interval'), child: const Text('소비 칼로리 (최근 1h)'))]),
-          _section('요약', [OutlinedButton(onPressed: onQueryStepsDaily, child: const Text('당일 누적 걸음 (오늘)')), OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary (현재 1h)')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary (어제)')), OutlinedButton(onPressed: () => onQueryByName('step_segment'), child: const Text('걸음 활동 구간 (iOS·오늘)'))]),
+          _section('요약', [OutlinedButton(onPressed: onQueryStepsDaily, child: const Text('당일 누적 걸음 (오늘)')), OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary (현재 1h)')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary (어제)'))]),
           // 수면·운동·영양은 변경 피드(신규+수정+삭제)로 조회 — 한 버튼으로 추가/편집/삭제 모두 확인.
           _section('수면·운동·영양 (변경 피드)', [OutlinedButton(onPressed: () => onQueryChanges('sleep'), child: const Text('수면 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('exercise'), child: const Text('운동 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('nutrition'), child: const Text('영양 (변경 24h)'))]),
           _section('신체·체성분', [OutlinedButton(onPressed: onQueryWeight, child: const Text('체중·체성분 (최근 30일)')), OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키 (최근 30일)'))]),
-          _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryByName('blood_glucose'), child: const Text('혈당 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('blood_pressure'), child: const Text('혈압 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('water_intake'), child: const Text('물 섭취 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS·오늘)')), OutlinedButton(onPressed: () => onQueryByName('medication'), child: const Text('투여약 복용로그 (iOS·오늘)'))]),
+          _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryByName('blood_glucose'), child: const Text('혈당 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('blood_pressure'), child: const Text('혈압 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('water_intake'), child: const Text('물 섭취 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS·오늘)'))]),
           const SizedBox(height: 8),
         ],
       ),

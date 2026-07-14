@@ -11,7 +11,6 @@ import 'height_value.dart';
 import 'hourly_summary_value.dart';
 import 'nutrition_value.dart';
 import 'sleep_value.dart';
-import 'step_segment_value.dart';
 import 'steps_daily_value.dart';
 import 'steps_interval_value.dart';
 import 'water_intake_value.dart';
@@ -31,15 +30,12 @@ class HealthRecord {
   // 체성분 — iOS 는 항목별 독립 타입(원천 1:1). Android 는 body_composition 한 행에 번들(현행 유지).
   static const String typeBmi = 'bmi';
   static const String typeBodyFatPercentage = 'body_fat_percentage';
-  static const String typeLeanBodyMass = 'lean_body_mass';
-  static const String typeWaistCircumference = 'waist_circumference';
   static const String typeBloodGlucose = 'blood_glucose';
   static const String typeBloodPressure = 'blood_pressure';
   // 영양 — Android 는 nutrition 한 행에 번들, iOS 는 영양소별 독립 타입(nutrition_<영양소>, 서버가 prefix 로 처리).
   static const String typeNutrition = 'nutrition';
   static const String typeWaterIntake = 'water_intake';
-  // step_segment·medication·insulin_delivery 는 iOS 전용(Android Samsung SDK 미제공). 플랫폼은 타입 이름이 아니라 source(apple_health/samsung_health)로 구분한다.
-  static const String typeStepSegment = 'step_segment';
+  // insulin_delivery 는 iOS 전용(Android Samsung SDK 미제공). 플랫폼은 타입 이름이 아니라 source(apple_health/samsung_health)로 구분한다.
   static const String typeHeight = 'height';
 
   final String dataType;
@@ -74,7 +70,6 @@ class HealthRecord {
   BloodPressureValue? get asBloodPressure => dataType == typeBloodPressure ? BloodPressureValue.fromJson(_decoded()) : null;
   NutritionValue? get asNutrition => dataType == typeNutrition ? NutritionValue.fromJson(_decoded()) : null;
   WaterIntakeValue? get asWaterIntake => dataType == typeWaterIntake ? WaterIntakeValue.fromJson(_decoded()) : null;
-  StepSegmentValue? get asStepSegment => dataType == typeStepSegment ? StepSegmentValue.fromJson(_decoded()) : null;
   HeightValue? get asHeight => dataType == typeHeight ? HeightValue.fromJson(_decoded()) : null;
 
   @override

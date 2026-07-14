@@ -15,9 +15,7 @@ export 'src/models/blood_pressure_value.dart';
 export 'src/models/insulin_delivery_value.dart';
 export 'src/models/nutrition_value.dart';
 export 'src/models/water_intake_value.dart';
-export 'src/models/step_segment_value.dart';
 export 'src/models/height_value.dart';
-export 'src/models/medication_value.dart';
 
 import 'flutter_health_platform_interface.dart';
 import 'src/models/health_record.dart';
@@ -102,23 +100,11 @@ class FlutterHealth {
   Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryWaterIntake(since, to);
 
-  /// [since]~[to] 구간의 걸음 구간 (step_segment) 목록을 반환. **iOS 전용.** 각 구간의 시작/종료는 envelope
-  /// timestamp/endTimestamp, 구간별 걸음수는 value.count. metric 의 합산값(stepsDaily)과 다름.
-  /// - iOS: 개별 stepCount 샘플(가변 시작/종료)을 그대로. value.sourceType = phone/watch/tablet/other
-  ///   로 기기 구분(iPhone·워치 동시 기록 시 시간 겹침 가능 → 단순 합은 stepsDaily 와 다를 수 있음).
-  /// - Android: 미지원(걸음은 walking 운동 세션으로 표시) → 빈 리스트 반환.
-  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
-      FlutterHealthPlatform.instance.queryStepSegments(since, to);
-
   /// 키(신장, dataType="height") 목록을 반환. value.value 는 **cm**(양 플랫폼 통일).
   /// - iOS: HealthKit `height` 샘플들을 [since]~[to] 구간에서 반환(최신순).
   /// - Android(Samsung): 사용자 프로필에 설정된 현재 키 1건(시간 범위 무시). 프로필 미설정 시 빈 리스트.
   Future<List<HealthRecord>> queryHeight(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryHeight(since, to);
-
-  /// [since]~[to] 구간 복약 이벤트 (medication, iOS 26+) 목록. 그 외 플랫폼/버전은 빈 리스트.
-  Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) =>
-      FlutterHealthPlatform.instance.queryMedication(since, to);
 
   /// [dataType] 의 변경 피드(추가·수정·삭제)를 반환. 삼성헬스/HealthKit 의 신규·편집·삭제를 소스와 1:1로 반영하기 위한 경로.
   ///

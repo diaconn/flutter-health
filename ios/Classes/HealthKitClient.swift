@@ -33,9 +33,6 @@ final class HealthKitClient: @unchecked Sendable {
         logger.info("requestPermission: requesting \(types.count) read types")
         try await store.requestAuthorization(toShare: [], read: types)
         logger.info("requestPermission: requestAuthorization completed")
-        // 복약(iOS 26+) per-object 권한은 여기서 요청하지 않는다 — 표준 권한 시트가 닫히는 순간
-        // 곧바로 요청하면 표시 컨텍스트 경합으로 await 가 안 끝나 requestPermission 전체가 멈춘다(hang).
-        // 대신 queryMedication 호출 시점(깨끗한 컨텍스트)에 비차단으로 요청한다.
         return true
     }
 
@@ -44,7 +41,7 @@ final class HealthKitClient: @unchecked Sendable {
     private func queryGridBuckets(_ identifier: HKQuantityTypeIdentifier, options: HKStatisticsOptions, since: Date, to: Date) async -> [(start: Date, end: Date, stats: HKStatistics)] {
         guard let qt = HKQuantityType.quantityType(forIdentifier: identifier) else { return [] }
         let secs = Double(Self.bucketMinutes * 60)
-        // 격자 경계로 내림 → 격자 앵커 겸 predicate 시작(버킷 전체 구간을 집계, 부분 집계 방지).
+        // since 를 10분 격자 경계로 내린 gridStart — 아래 collection 의 anchorDate 이자 predicate 시작점으로 함께 쓴다(버킷 전체 구간을 집계해 부분 집계 방지).
         let gridStart = Date(timeIntervalSince1970: floor(since.timeIntervalSince1970 / secs) * secs)
         guard gridStart < to else { return [] }
         // .strictStartDate 는 경계 가로지른 샘플을 누락 → 기본 overlap 으로 Apple 건강 UI 와 일치.
@@ -144,9 +141,9 @@ final class HealthKitClient: @unchecked Sendable {
 
     func queryEndedSleepSessions(since: Date, to: Date) async -> [HealthRecord] {
         guard HKObjectType.categoryType(forIdentifier: .sleepAnalysis) != nil else { return [] }
-        // 조회 시작을 1일 앞당겨 세션 앞부분 구간까지 확보해 session.start 를 안정화한다(Android queryEndedSleepSessions 동형).
-        // 슬라이딩 36h 창의 since 에 그대로 묶이면 재조회 때마다 since 가 그 밤의 세그먼트 경계를 넘어 세션 start 가 잘리고,
-        // 같은 밤이 매번 다른 start_dttm 으로 적재돼 UNIQUE(member,'SLEEP',start_dttm) dedup 을 빠져나가 중복 행이 생긴다.
+        // 조회 시작을 하루 앞당겨 밤잠 앞부분 조각까지 확보 → 세션 시작시각(session.start)이 매번 같게 잡히게 한다(Android queryEndedSleepSessions 와 동일).
+        // since(36h 씩 밀리는 수집 창)부터 그대로 조회하면 since 가 그 밤 수면 도중에 걸릴 때 세션 시작이 잘려,
+        // 같은 밤이 매번 다른 start_dttm 으로 저장 → UNIQUE(member,'SLEEP',start_dttm) 중복제거를 통과해 한 밤이 여러 행으로 쌓인다.
         let fetchSince = Calendar.current.date(byAdding: .day, value: -1, to: since) ?? since
         let predicate = HKQuery.predicateForSamples(withStart: fetchSince, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
@@ -209,7 +206,7 @@ final class HealthKitClient: @unchecked Sendable {
         v.duration = durationMin
 
         // 칼로리·HR·거리 (statistics)
-        // 수동 추가 워크아웃은 statistics(for:) 가 nil → totalEnergyBurned 로 폴백 (워치는 statistics 가 채워져 이중계산 없음).
+        // 수동 입력 운동은 statistics(for:) 가 nil 이라 totalEnergyBurned 로 폴백. 워치 운동은 statistics 가 채워져 폴백을 안 타므로 두 값을 겹쳐 세지 않는다.
         v.calories = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
             ?? workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
         let hrStats = workout.statistics(for: HKQuantityType(.heartRate))
@@ -235,7 +232,7 @@ final class HealthKitClient: @unchecked Sendable {
 
     func queryHourlySummary(from hourStart: Date, to hourEnd: Date) async -> HealthRecord? {
         async let hrStats = queryHeartRateStats(from: hourStart, to: hourEnd)
-        // 정시 기준 버킷 합산 — 경계 샘플을 시간비례로 나누고 중복 제거.
+        // 정시(HH:00) 경계로 시간별 합산 — 경계를 걸친 샘플은 HKStatisticsCollectionQuery 가 시간 비례로 쪼개고, 여러 소스 중복은 자동 제거한다.
         let hourInterval = DateComponents(hour: 1)
         async let stepsTotal = querySumBucketed(.stepCount, unit: .count(), bucketStart: hourStart, interval: hourInterval)
         async let activeKcalQ = querySumBucketed(.activeEnergyBurned, unit: .kilocalorie(), bucketStart: hourStart, interval: hourInterval)
@@ -285,7 +282,7 @@ final class HealthKitClient: @unchecked Sendable {
               let dayEnd = cal.dateInterval(of: .day, for: date)?.end else { return nil }
 
         async let hrStats = queryHeartRateStats(from: dayStart, to: dayEnd)
-        // 자정 기준 버킷 합산 — 경계 샘플을 시간비례로 나누고 중복 제거해 Apple 건강 UI 와 일치.
+        // 자정 경계로 하루 합산 — 경계를 걸친 샘플은 시간 비례로 쪼개고 여러 소스 중복은 제거해 Apple 건강 UI 와 일치.
         let dayInterval = DateComponents(day: 1)
         async let stepsTotal = querySumBucketed(.stepCount, unit: .count(), bucketStart: dayStart, interval: dayInterval)
         async let caloriesActive = querySumBucketed(.activeEnergyBurned, unit: .kilocalorie(), bucketStart: dayStart, interval: dayInterval)
@@ -346,20 +343,16 @@ final class HealthKitClient: @unchecked Sendable {
         )
     }
 
-    /// 체중·체성분 — HealthKit 원천과 1:1. 체중은 weight 타입, BMI·체지방률·제지방량·허리둘레는
-    /// 각자 독립 타입으로 per-sample 적재. 5종 동시 조회(직렬 대기 방지).
+    /// 체중·체성분 — HealthKit 원천과 1:1. 체중은 weight 타입, BMI·체지방률은
+    /// 각자 독립 타입으로 per-sample 적재. 3종 동시 조회(직렬 대기 방지).
     func queryWeights(since: Date, to: Date) async -> [HealthRecord] {
         async let weight  = queryQuantitySamples(.bodyMass, unit: weightUnit, dataType: Self.dataTypeWeight, since: since, to: to) { kg, _ in kg > 0 ? WeightValue(weight: kg) : nil }
         async let bmi     = queryQuantitySamples(.bodyMassIndex, unit: .count(), dataType: Self.dataTypeBmi, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "kg/m²") : nil }
         // bodyFat 은 .percent()=분수(0~1)라 100배해 %.
         async let bodyFat = queryQuantitySamples(.bodyFatPercentage, unit: .percent(), dataType: Self.dataTypeBodyFatPercentage, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v * 100, unit: "%") : nil }
-        async let lean    = queryQuantitySamples(.leanBodyMass, unit: weightUnit, dataType: Self.dataTypeLeanBodyMass, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "kg") : nil }
-        async let waist   = queryQuantitySamples(.waistCircumference, unit: HKUnit.meterUnit(with: .centi), dataType: Self.dataTypeWaistCircumference, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "cm") : nil }
         var out = await weight
         out += await bmi
         out += await bodyFat
-        out += await lean
-        out += await waist
         return out
     }
 
@@ -562,92 +555,6 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// 개별 걸음 샘플(stepCount)을 각각 시작/종료/걸음수로 반환. 합산(metric.stepsDaily)과 달리
-    /// 건강 앱 상세목록의 개별 기록을 그대로 노출한다. iPhone·워치가 각각 기록하면 시간이 겹치는
-    /// 샘플이 함께 나오므로(sourceType 으로 구분), 단순 합은 stepsDaily 와 다를 수 있다.
-    func queryStepSegments(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.stepCount, unit: .count(), dataType: Self.dataTypeStepSegment, since: since, to: to) { v, sample in
-            let count = Int(v)
-            return count > 0 ? StepSegmentValue(count: count, sourceType: Self.stepSourceType(sample)) : nil
-        }
-    }
-
-    /// HealthKit 샘플의 기록 기기 종류를 단순 분류한다. 사용자 지정 기기명(예: "OO의 iPhone") 대신
-    /// "phone"|"watch"|"tablet"|"other" 로 정규화 — 소스가 사용자별로 달라 경우의 수가 폭발하는 것을 막는다.
-    /// 모델 식별자(예: "iPhone14,5", "Watch6,18") 또는 HKDevice 이름("iPhone"/"Apple Watch")으로 판별.
-    private static func stepSourceType(_ sample: HKSample) -> String {
-        let raw = (sample.device?.name ?? sample.sourceRevision.productType ?? "").lowercased()
-        if raw.contains("watch") { return "watch" }
-        if raw.contains("iphone") { return "phone" }
-        if raw.contains("ipad") { return "tablet" }
-        return "other"
-    }
-
-    /// 특수: 복약 이벤트(medication, iOS 26+). 복용 상태/용량을 수집한다. 약 이름은 미포함.
-    @available(iOS 26.0, *)
-    func queryMedication(since: Date, to: Date) async -> [HealthRecord] {
-        requestMedicationAuthorization()   // per-object 권한 lazy 요청 (비차단 — hang 방지)
-        let type = HKObjectType.medicationDoseEventType()
-        let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: .strictEndDate)
-        return await withCheckedContinuation { continuation in
-            var resumed = false
-            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]) { [weak self] _, samples, _ in
-                guard let self = self else {
-                    if !resumed { resumed = true; continuation.resume(returning: []) }
-                    return
-                }
-                let tz = self.currentTzOffset()
-                let now = self.toMs(Date())
-                let records: [HealthRecord] = (samples as? [HKMedicationDoseEvent] ?? []).map { ev in
-                    let value = MedicationValue(
-                        logStatus: self.mapDoseLogStatus(ev.logStatus),
-                        scheduleType: ev.scheduleType == .schedule ? "scheduled" : "as_needed",
-                        doseQuantity: ev.doseQuantity,
-                        unit: ev.unit.unitString,
-                        scheduledDate: ev.scheduledDate.map { self.toMs($0) }
-                    )
-                    return HealthRecord(
-                        dataType: Self.dataTypeMedication,
-                        timestamp: self.toMs(ev.startDate),
-                        endTimestamp: self.toMs(ev.endDate),
-                        tzOffset: tz,
-                        source: Self.source,
-                        valueJson: self.encodeToJson(value),
-                        createdAt: now,
-                        uid: ev.uuid.uuidString
-                    )
-                }
-                if !resumed { resumed = true; continuation.resume(returning: records) }
-            }
-            self.store.execute(query)
-        }
-    }
-
-    /// 복약(iOS 26+) per-object 권한을 fire-and-forget 로 요청한다.
-    /// await 하지 않으므로(표시 컨텍스트 경합 시 멈출 수 있음) 호출자(queryMedication)를 절대 막지 않는다.
-    /// 권한 부여 전 첫 조회는 빈 결과일 수 있고, 시트에서 허용 후 다시 조회하면 데이터가 잡힌다.
-    @available(iOS 26.0, *)
-    private func requestMedicationAuthorization() {
-        Task { [weak self] in
-            guard let self else { return }
-            try? await self.store.requestPerObjectReadAuthorization(
-                for: HKObjectType.userAnnotatedMedicationType(), predicate: nil)
-        }
-    }
-
-    @available(iOS 26.0, *)
-    private func mapDoseLogStatus(_ s: HKMedicationDoseEvent.LogStatus) -> String {
-        switch s {
-        case .notInteracted: return "not_interacted"
-        case .notificationNotSent: return "notification_not_sent"
-        case .snoozed: return "snoozed"
-        case .taken: return "taken"
-        case .skipped: return "skipped"
-        case .notLogged: return "not_logged"
-        @unknown default: return "unknown"
-        }
-    }
-
     // MARK: - 변경 피드 (수정/삭제)
 
     /// HKAnchoredObjectQuery 로 변경 피드(추가 샘플 + 삭제 객체 UUID + 다음 anchor)를 받는다.
@@ -655,11 +562,13 @@ final class HealthKitClient: @unchecked Sendable {
     /// - anchorToken(base64) 이 있으면 그 시점 이후 **델타만**(추가/삭제), 없으면 since~to 범위 전량이 기준선.
     /// - HealthKit 의 "수정"은 구 uuid 삭제 + 신 uuid 추가로 오므로, 수정 시 신규는 upserted, 구본은 deletedUids 에 나온다.
     /// - deletedObjects 는 anchor 확립 이후 삭제분만 잡히므로 반드시 (기준선 호출 → 편집/삭제 → 재호출) 순서로 검증.
+    /// - 수면·영양은 델타가 raw 조각으로만 온다(수면=단계 조각 / 영양=섭취에너지 샘플) → 추가분이 있으면 그 구간을 정식 빌더로 재조회해 완전한 레코드(수면=병합 세션 / 영양=영양소 per-sample 전체)로 반환한다.
     func queryChanges(dataType: String, since: Date, to: Date, anchorToken: String?) async -> (upserted: [HealthRecord], deletedUids: [String], token: String?) {
         guard let sampleType = Self.sampleType(forDataType: dataType) else { return ([], [], nil) }
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: [])
         let anchor = anchorToken.flatMap { Self.decodeAnchor($0) }
-        // 1) 앵커드 쿼리로 raw 결과(추가 샘플·삭제 uuid·다음 anchor) 수집. 핸들러가 비동기 컨텍스트가 아니라 여기서 raw 만 꺼낸다.
+        // 1) 앵커드 쿼리로 raw 결과만 수집: 추가 샘플·삭제 uuid·다음 anchor.
+        //    쿼리 콜백 안에서는 await 를 못 써서(완전 레코드 재조회는 2)에서), continuation 으로 raw 만 넘긴다.
         let (added, deletedUids, token): ([HKSample], [String], String?) = await withCheckedContinuation { continuation in
             let query = HKAnchoredObjectQuery(type: sampleType, predicate: predicate, anchor: anchor, limit: HKObjectQueryNoLimit) { _, addedSamples, deletedObjects, newAnchor, _ in
                 let uids = (deletedObjects ?? []).map { $0.uuid.uuidString }
@@ -668,7 +577,17 @@ final class HealthKitClient: @unchecked Sendable {
             }
             self.store.execute(query)
         }
-        // 2) 추가 샘플 → HealthRecord. 운동은 기존 빌더 재사용(값 완전), 그 외는 최소 레코드(uid+시각+원본값).
+        // 2-a) 수면·영양: anchored 델타는 raw 조각으로만 온다(수면=단계 조각 여러 개 / 영양=섭취에너지 샘플).
+        //      added 가 있으면 그 최소 시작시각~현재를 정식 빌더로 재조회해 완전한 레코드로 대체한다
+        //      (수면=30분 병합 세션 1건 / 영양=영양소별 per-sample 전체). added 가 비면 삭제뿐 → deletedUids·token 만 반환.
+        if dataType == Self.dataTypeSleep || dataType == "nutrition" || dataType == "nutrition_energy" {
+            guard let spanStart = added.map({ $0.startDate }).min() else { return ([], deletedUids, token) }
+            let full = dataType == Self.dataTypeSleep
+                ? await queryEndedSleepSessions(since: spanStart, to: Date())
+                : await queryNutrition(since: spanStart, to: Date())
+            return (full, deletedUids, token)
+        }
+        // 2-b) 그 외(운동·체중·혈당 등) 추가 샘플 → 개별 레코드. 운동은 완전 빌더 재사용, 나머지는 최소 레코드(uid+시각+원본값).
         let tz = currentTzOffset()
         let now = toMs(Date())
         var records: [HealthRecord] = []
@@ -767,8 +686,6 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .height)!,
         HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)!,
         HKObjectType.quantityType(forIdentifier: .bodyMassIndex)!,
-        HKObjectType.quantityType(forIdentifier: .leanBodyMass)!,        // 제지방량(체성분 — 독립 타입으로 적재)
-        HKObjectType.quantityType(forIdentifier: .waistCircumference)!,  // 허리둘레(체성분 — 독립 타입으로 적재)
         HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
         HKObjectType.workoutType(),
         // 혈당/혈압/수분
@@ -800,8 +717,6 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .dietaryCaffeine)!,
         HKObjectType.quantityType(forIdentifier: .dietaryVitaminD)!
         ]
-        // 복약(iOS 26+)은 일반 read set 에 넣으면 크래시 → 여기서 제외하고
-        // queryMedication 호출 시점에 requestMedicationAuthorization() 로 per-object 권한을 따로 요청한다.
         return types
     }
 
@@ -827,7 +742,7 @@ final class HealthKitClient: @unchecked Sendable {
         guard let qt = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
         let cal = Calendar.current
         guard let bucketEnd = cal.date(byAdding: interval, to: bucketStart) else { return nil }
-        // leading 크로서(버킷 시작 직전 시작) 포함하도록 predicate 를 하루 앞에서 시작. collection 은 bucketStart 버킷만 읽으므로 안전.
+        // 버킷 시작 직전에 시작해 버킷으로 이어지는 샘플까지 predicate 에 포함되도록 조회를 하루 앞에서 시작. collection 은 bucketStart 버킷만 읽으므로 안전.
         let predStart = cal.date(byAdding: .day, value: -1, to: bucketStart) ?? bucketStart
         let predicate = HKQuery.predicateForSamples(withStart: predStart, end: bucketEnd, options: [])
         return await withCheckedContinuation { continuation in
@@ -1100,7 +1015,7 @@ final class HealthKitClient: @unchecked Sendable {
         let weight: Double
     }
 
-    /// 체성분(bmi·체지방률·제지방량·허리둘레)·영양소(nutrition_*) per-sample 공통 값 — 측정값 + 단위.
+    /// 체성분(bmi·체지방률)·영양소(nutrition_*) per-sample 공통 값 — 측정값 + 단위.
     fileprivate struct QuantitySampleValue: Codable {
         let value: Double
         let unit: String
@@ -1130,21 +1045,8 @@ final class HealthKitClient: @unchecked Sendable {
         let amount: Double   // 각 음용의 원본 양(mL).
     }
 
-    fileprivate struct StepSegmentValue: Codable {
-        let count: Int
-        let sourceType: String       // 기록 기기 종류: "phone"|"watch"|"tablet"|"other" (사용자 지정 기기명 대신 정규화)
-    }
-
     fileprivate struct HeightValue: Codable {
         let height: Double           // cm
-    }
-
-    fileprivate struct MedicationValue: Codable {
-        let logStatus: String
-        let scheduleType: String
-        let doseQuantity: Double?
-        let unit: String?
-        let scheduledDate: Int64?
     }
 
     /// 변경 피드 — 카테고리(수면 등) raw 조각 값.
@@ -1189,15 +1091,11 @@ final class HealthKitClient: @unchecked Sendable {
     static let dataTypeWeight = "weight"
     static let dataTypeBmi = "bmi"
     static let dataTypeBodyFatPercentage = "body_fat_percentage"
-    static let dataTypeLeanBodyMass = "lean_body_mass"
-    static let dataTypeWaistCircumference = "waist_circumference"
     static let dataTypeBloodGlucose = "blood_glucose"
     static let dataTypeBloodPressure = "blood_pressure"
     static let dataTypeInsulinDelivery = "insulin_delivery"
     static let dataTypeWaterIntake = "water_intake"
-    static let dataTypeStepSegment = "step_segment"
     static let dataTypeHeight = "height"
-    static let dataTypeMedication = "medication"
     static let source = "apple_health"
 }
 

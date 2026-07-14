@@ -159,8 +159,7 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
 
         case "queryHeartRate", "querySteps", "queryDistance", "queryCalories",
              "queryBloodGlucose", "queryBloodPressure", "queryInsulinDelivery", "queryNutrition", "queryWaterIntake",
-             "queryStepSegments", "queryHeight",
-             "queryMedication":
+             "queryHeight":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
                   let toMs    = args["to"]    as? Int else {
@@ -182,11 +181,7 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 case "queryInsulinDelivery":      records = await client.queryInsulinDelivery(since: since, to: to)
                 case "queryNutrition":            records = await client.queryNutrition(since: since, to: to)
                 case "queryWaterIntake":          records = await client.queryWaterIntake(since: since, to: to)
-                case "queryStepSegments":         records = await client.queryStepSegments(since: since, to: to)
                 case "queryHeight":               records = await client.queryHeight(since: since, to: to)
-                case "queryMedication":
-                    if #available(iOS 26.0, *) { records = await client.queryMedication(since: since, to: to) }
-                    else { records = [] }
                 default:                          records = []
                 }
                 DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }

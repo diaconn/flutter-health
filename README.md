@@ -108,7 +108,7 @@ for (final r in beats) {
 | `queryDailySummary(date)` | 1일 집계 (HR·걸음·칼로리·거리·수면·운동) |
 | `queryWeights(since, to)` | 구간 내 모든 체중 측정 목록 최신순 (weight·BMI·체지방률) |
 
-> 모든 list 반환 쿼리(`queryWeights`, `queryBloodGlucose`, `queryStepSegments` 등)는 **최신순(timestamp 내림차순)** 으로 정렬되어 반환됩니다.
+> 모든 list 반환 쿼리(`queryWeights`, `queryBloodGlucose` 등)는 **최신순(timestamp 내림차순)** 으로 정렬되어 반환됩니다.
 
 ---
 

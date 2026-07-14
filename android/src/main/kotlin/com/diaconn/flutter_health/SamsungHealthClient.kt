@@ -86,7 +86,7 @@ class SamsungHealthClient(private val context: Context) {
     suspend fun queryHeartRate(since: Long, to: Long): List<HealthRecord> {
         val s = store ?: return emptyList()
         return runCatching {
-            // 격자 경계로 내림(epoch 내림 = 벽시계 10분 정렬; KST 등 10분배수 offset).
+            // since 를 10분 격자 경계로 내림. epoch(ms)를 10분 단위로 내리면 UTC 10분 눈금인데, KST(+9:00)처럼 타임존 offset 이 10분 배수라 로컬 벽시계 10분 눈금(:00·:10·:20…)과도 일치한다.
             val gridStart = (since / BUCKET_MS) * BUCKET_MS
             if (gridStart >= to) return@runCatching emptyList<HealthRecord>()
             val filter = InstantTimeFilter.of(Instant.ofEpochMilli(gridStart), Instant.ofEpochMilli(to))
@@ -366,16 +366,6 @@ class SamsungHealthClient(private val context: Context) {
 
                     val bmi = bcf(DataType.BodyCompositionType.BODY_MASS_INDEX)
                     val bodyFat = bcf(DataType.BodyCompositionType.BODY_FAT)
-                    val bodyFatMass = bcf(DataType.BodyCompositionType.BODY_FAT_MASS)
-                    val fatFree = bcf(DataType.BodyCompositionType.FAT_FREE)
-                    val fatFreeMass = bcf(DataType.BodyCompositionType.FAT_FREE_MASS)
-                    val skeletalMuscle = bcf(DataType.BodyCompositionType.SKELETAL_MUSCLE)
-                    val skeletalMuscleMass = bcf(DataType.BodyCompositionType.SKELETAL_MUSCLE_MASS)
-                    val muscleMass = bcf(DataType.BodyCompositionType.MUSCLE_MASS)
-                    val totalBodyWater = bcf(DataType.BodyCompositionType.TOTAL_BODY_WATER)
-                    val basalMetabolicRate = point
-                        .getValueOrDefault(DataType.BodyCompositionType.BASAL_METABOLIC_RATE, 0)
-                        .takeIf { it > 0 }
 
                     val startMs = point.startTime?.toEpochMilli() ?: since
                     val endMs = point.endTime?.toEpochMilli() ?: startMs
@@ -389,15 +379,7 @@ class SamsungHealthClient(private val context: Context) {
                         valueJson = json.encodeToString(WeightValue(
                             weight = weight.toDouble(),
                             bmi = bmi,
-                            bodyFat = bodyFat,
-                            bodyFatMass = bodyFatMass,
-                            fatFree = fatFree,
-                            fatFreeMass = fatFreeMass,
-                            skeletalMuscle = skeletalMuscle,
-                            skeletalMuscleMass = skeletalMuscleMass,
-                            muscleMass = muscleMass,
-                            totalBodyWater = totalBodyWater,
-                            basalMetabolicRate = basalMetabolicRate
+                            bodyFat = bodyFat
                         )),
                         createdAt = now,
                         uid = point.uid,
@@ -477,54 +459,60 @@ class SamsungHealthClient(private val context: Context) {
     /** [since]~[to] 구간 내 모든 영양 기록. */
     suspend fun queryNutrition(since: Long, to: Long): List<HealthRecord> =
         readPoints(since, to, DataTypes.NUTRITION, "영양") { point, startMs, endMs, tz, now ->
-            val mealType = runCatching { point.getValue(DataType.NutritionType.MEAL_TYPE) }
-                .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase()
-            val title = runCatching { point.getValue(DataType.NutritionType.TITLE) }.getOrNull()
-            val calories = nf(point, DataType.NutritionType.CALORIES)
-            val totalFat = nf(point, DataType.NutritionType.TOTAL_FAT)
-            val saturatedFat = nf(point, DataType.NutritionType.SATURATED_FAT)
-            val polyunsaturatedFat = nf(point, DataType.NutritionType.POLYSATURATED_FAT)
-            val monounsaturatedFat = nf(point, DataType.NutritionType.MONOSATURATED_FAT)
-            val transFat = nf(point, DataType.NutritionType.TRANS_FAT)
-            val carbohydrate = nf(point, DataType.NutritionType.CARBOHYDRATE)
-            val dietaryFiber = nf(point, DataType.NutritionType.DIETARY_FIBER)
-            val sugar = nf(point, DataType.NutritionType.SUGAR)
-            val protein = nf(point, DataType.NutritionType.PROTEIN)
-            val cholesterol = nf(point, DataType.NutritionType.CHOLESTEROL)
-            val sodium = nf(point, DataType.NutritionType.SODIUM)
-            val potassium = nf(point, DataType.NutritionType.POTASSIUM)
-            val vitaminA = nf(point, DataType.NutritionType.VITAMIN_A)
-            val vitaminC = nf(point, DataType.NutritionType.VITAMIN_C)
-            val calcium = nf(point, DataType.NutritionType.CALCIUM)
-            val iron = nf(point, DataType.NutritionType.IRON)
-
-            // 19개 영양 필드 중 하나라도 있으면 valid 처리 (비타민 단독 입력 등 케이스 보존).
-            val anyField = listOf(
-                mealType, title, calories, totalFat, saturatedFat, polyunsaturatedFat, monounsaturatedFat,
-                transFat, carbohydrate, dietaryFiber, sugar, protein, cholesterol, sodium, potassium,
-                vitaminA, vitaminC, calcium, iron
-            ).any { it != null }
-            if (!anyField) return@readPoints null
-
+            val value = nutritionValueOf(point) ?: return@readPoints null
             HealthRecord(
                 dataType = DATA_TYPE_NUTRITION,
                 timestamp = startMs,
                 endTimestamp = endMs,
                 tzOffset = tz,
                 source = SOURCE,
-                valueJson = json.encodeToString(NutritionValue(
-                    mealType = mealType, title = title, calories = calories,
-                    totalFat = totalFat, saturatedFat = saturatedFat,
-                    polyunsaturatedFat = polyunsaturatedFat, monounsaturatedFat = monounsaturatedFat,
-                    transFat = transFat, carbohydrate = carbohydrate, dietaryFiber = dietaryFiber,
-                    sugar = sugar, protein = protein, cholesterol = cholesterol,
-                    sodium = sodium, potassium = potassium,
-                    vitaminA = vitaminA, vitaminC = vitaminC, calcium = calcium, iron = iron
-                )),
+                valueJson = json.encodeToString(value),
                 createdAt = now,
                 uid = point.uid,
             )
         }
+
+    /** 영양 포인트 → 전체 영양소 값(19필드). 유효 필드가 하나도 없으면 null. queryNutrition·변경 피드 공용. */
+    private fun nutritionValueOf(point: HealthDataPoint): NutritionValue? {
+        val mealType = runCatching { point.getValue(DataType.NutritionType.MEAL_TYPE) }
+            .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase()
+        val title = runCatching { point.getValue(DataType.NutritionType.TITLE) }.getOrNull()
+        val calories = nf(point, DataType.NutritionType.CALORIES)
+        val totalFat = nf(point, DataType.NutritionType.TOTAL_FAT)
+        val saturatedFat = nf(point, DataType.NutritionType.SATURATED_FAT)
+        val polyunsaturatedFat = nf(point, DataType.NutritionType.POLYSATURATED_FAT)
+        val monounsaturatedFat = nf(point, DataType.NutritionType.MONOSATURATED_FAT)
+        val transFat = nf(point, DataType.NutritionType.TRANS_FAT)
+        val carbohydrate = nf(point, DataType.NutritionType.CARBOHYDRATE)
+        val dietaryFiber = nf(point, DataType.NutritionType.DIETARY_FIBER)
+        val sugar = nf(point, DataType.NutritionType.SUGAR)
+        val protein = nf(point, DataType.NutritionType.PROTEIN)
+        val cholesterol = nf(point, DataType.NutritionType.CHOLESTEROL)
+        val sodium = nf(point, DataType.NutritionType.SODIUM)
+        val potassium = nf(point, DataType.NutritionType.POTASSIUM)
+        val vitaminA = nf(point, DataType.NutritionType.VITAMIN_A)
+        val vitaminC = nf(point, DataType.NutritionType.VITAMIN_C)
+        val calcium = nf(point, DataType.NutritionType.CALCIUM)
+        val iron = nf(point, DataType.NutritionType.IRON)
+
+        // 19개 영양 필드 중 하나라도 있으면 valid 처리 (비타민 단독 입력 등 케이스 보존).
+        val anyField = listOf(
+            mealType, title, calories, totalFat, saturatedFat, polyunsaturatedFat, monounsaturatedFat,
+            transFat, carbohydrate, dietaryFiber, sugar, protein, cholesterol, sodium, potassium,
+            vitaminA, vitaminC, calcium, iron
+        ).any { it != null }
+        if (!anyField) return null
+
+        return NutritionValue(
+            mealType = mealType, title = title, calories = calories,
+            totalFat = totalFat, saturatedFat = saturatedFat,
+            polyunsaturatedFat = polyunsaturatedFat, monounsaturatedFat = monounsaturatedFat,
+            transFat = transFat, carbohydrate = carbohydrate, dietaryFiber = dietaryFiber,
+            sugar = sugar, protein = protein, cholesterol = cholesterol,
+            sodium = sodium, potassium = potassium,
+            vitaminA = vitaminA, vitaminC = vitaminC, calcium = calcium, iron = iron
+        )
+    }
 
     /**
      * [since]~[to] 구간 내 모든 수분 섭취 기록.
@@ -830,23 +818,22 @@ class SamsungHealthClient(private val context: Context) {
         else -> null
     }
 
-    /** 변경 피드 UPSERT 데이터포인트 → HealthRecord. 세션형은 완전한 빌더 재사용, 그 외는 최소 레코드. */
+    /** 변경 피드 UPSERT 데이터포인트 → HealthRecord. 세션형(수면·운동)·영양은 완전 빌더, 그 외는 최소 레코드. */
     private fun buildChangeRecord(dataType: String, point: HealthDataPoint): HealthRecord? = when (dataType) {
         DATA_TYPE_SLEEP -> buildSleepRecord(point)
         DATA_TYPE_EXERCISE -> buildExerciseRecord(point)
-        else -> {
-            // 값 완전성보다 uid·변경신호 확인이 목적 — uid+시각, 영양만 어느 음식인지 알 수 있게 title/mealType/kcal 부가.
+        DATA_TYPE_NUTRITION -> {
+            // 정식 조회(queryNutrition)와 동일하게 전체 영양소(19필드)를 담아 완전한 레코드로 반환.
             val startMs = point.startTime?.toEpochMilli() ?: return null
             val endMs = point.endTime?.toEpochMilli() ?: startMs
-            val valueJson = if (dataType == DATA_TYPE_NUTRITION) {
-                json.encodeToString(ChangeMinimalValue(
-                    mealType = runCatching { point.getValue(DataType.NutritionType.MEAL_TYPE) }
-                        .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase(),
-                    title = runCatching { point.getValue(DataType.NutritionType.TITLE) }.getOrNull(),
-                    calories = nf(point, DataType.NutritionType.CALORIES)
-                ))
-            } else "{}"
-            HealthRecord(dataType, startMs, endMs, currentTzOffset(), SOURCE, valueJson, System.currentTimeMillis(), uid = point.uid)
+            val value = nutritionValueOf(point) ?: return null
+            HealthRecord(dataType, startMs, endMs, currentTzOffset(), SOURCE, json.encodeToString(value), System.currentTimeMillis(), uid = point.uid)
+        }
+        else -> {
+            // 변경 피드 소비 대상 아님(혈당·혈압·체중·물) — uid+시각 최소 레코드.
+            val startMs = point.startTime?.toEpochMilli() ?: return null
+            val endMs = point.endTime?.toEpochMilli() ?: startMs
+            HealthRecord(dataType, startMs, endMs, currentTzOffset(), SOURCE, "{}", System.currentTimeMillis(), uid = point.uid)
         }
     }
 
@@ -909,15 +896,7 @@ class SamsungHealthClient(private val context: Context) {
     private data class WeightValue(
         val weight: Double,
         val bmi: Double?,
-        val bodyFat: Double?,
-        val bodyFatMass: Double?,
-        val fatFree: Double?,
-        val fatFreeMass: Double?,
-        val skeletalMuscle: Double?,
-        val skeletalMuscleMass: Double?,
-        val muscleMass: Double?,
-        val totalBodyWater: Double?,
-        val basalMetabolicRate: Int?
+        val bodyFat: Double?
     )
 
     @Serializable
@@ -990,10 +969,6 @@ class SamsungHealthClient(private val context: Context) {
 
     /** 변경 피드 조회 결과 홀더(플러그인 채널로 넘길 원자료). */
     data class ChangeResult(val upserted: List<HealthRecord>, val deleted: List<String>, val pageToken: String?)
-
-    /** 변경 피드 최소 값(영양은 어느 음식인지 식별). */
-    @Serializable
-    private data class ChangeMinimalValue(val mealType: String?, val title: String?, val calories: Double?)
 
     companion object {
         // 변경 피드(readChanges) 페이지 소진 상한 — 무한 루프 방지용 안전장치.

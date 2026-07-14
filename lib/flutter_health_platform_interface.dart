@@ -45,12 +45,8 @@ abstract class FlutterHealthPlatform extends PlatformInterface {
   Future<List<HealthRecord>> queryInsulinDelivery(DateTime since, DateTime to) => throw UnimplementedError();
   Future<List<HealthRecord>> queryNutrition(DateTime since, DateTime to) => throw UnimplementedError();
   Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) => throw UnimplementedError();
-  /// 걸음 구간(step_segment)을 시작/종료/걸음수로 반환. **iOS 전용** — 개별 stepCount 샘플
-  /// (sourceType phone/watch/tablet/other). Android 는 미지원(걸음은 walking 운동 세션으로 표시) → 빈 리스트.
-  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) => throw UnimplementedError();
   /// 키(신장, cm). iOS=HealthKit height 샘플 / Android=Samsung UserProfile 현재 키 1건.
   Future<List<HealthRecord>> queryHeight(DateTime since, DateTime to) => throw UnimplementedError();
-  Future<List<HealthRecord>> queryMedication(DateTime since, DateTime to) => throw UnimplementedError();
   /// 변경 피드(추가·수정·삭제). iOS=HKAnchoredObjectQuery(anchor 델타) / Android=readChanges(변경시각 창).
   Future<HealthChanges> queryChanges(String dataType, {DateTime? since, DateTime? to, String? token}) => throw UnimplementedError();
 }
