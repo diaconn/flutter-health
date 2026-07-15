@@ -4,7 +4,6 @@ export 'src/models/heart_rate_interval_value.dart';
 export 'src/models/steps_interval_value.dart';
 export 'src/models/distance_interval_value.dart';
 export 'src/models/calories_interval_value.dart';
-export 'src/models/steps_daily_value.dart';
 export 'src/models/sleep_value.dart';
 export 'src/models/exercise_value.dart';
 export 'src/models/hourly_summary_value.dart';
@@ -16,7 +15,6 @@ export 'src/models/insulin_delivery_value.dart';
 export 'src/models/nutrition_value.dart';
 export 'src/models/water_intake_value.dart';
 export 'src/models/height_value.dart';
-export 'src/models/step_segment_value.dart';
 
 import 'flutter_health_platform_interface.dart';
 import 'src/models/health_record.dart';
@@ -55,10 +53,6 @@ class FlutterHealth {
   /// [since]~[to] 구간의 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total+active kcal)으로 반환. 완료된 칸만.
   Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryCalories(since, to);
-
-  /// 당일 누적 걸음 수(steps_daily) 1건을 반환. [date] 가 가리키는 날의 자정~수집 시점 누적. 데이터 없으면 빈 리스트.
-  Future<List<HealthRecord>> queryStepsDaily(DateTime date) =>
-      FlutterHealthPlatform.instance.queryStepsDaily(date);
 
   /// [since]~[to] 구간에 종료된 수면 세션 목록을 반환.
   Future<List<HealthRecord>> queryEndedSleepSessions(DateTime since, DateTime to) =>
@@ -101,11 +95,6 @@ class FlutterHealth {
   Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryWaterIntake(since, to);
 
-  /// [since]~[to] 걸음 활동 구간(step_segment). **iOS 전용** — 개별 stepCount 샘플(value.count,
-  /// value.sourceType=phone/watch/tablet/other). Android 는 STEPS_INTERVAL 로 수집 → 빈 리스트.
-  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
-      FlutterHealthPlatform.instance.queryStepSegments(since, to);
-
   /// 키(신장, dataType="height") 목록을 반환. value.value 는 **cm**(양 플랫폼 통일).
   /// - iOS: HealthKit `height` 샘플들을 [since]~[to] 구간에서 반환(최신순).
   /// - Android(Samsung): 사용자 프로필에 설정된 현재 키 1건(시간 범위 무시). 프로필 미설정 시 빈 리스트.
@@ -121,7 +110,7 @@ class FlutterHealth {
   ///   - Android: [since]~[to] 변경시각 창. 다음 증분은 [since]=직전 [to] 로 호출(내부에서 전 페이지 소진 → 반환 token 은 항상 null).
   ///
   /// 지원 [dataType]: `sleep`·`exercise`·`nutrition`·`blood_glucose`·`blood_pressure`·`weight`·`water_intake` (그 외는 빈 결과).
-  /// 단, 실제 소비는 세션·다건 편집 이슈가 있는 `sleep`·`exercise`·`nutrition` 3종만 변경 피드로 쓰고, 나머지 4종은 API 지원만 하고 일반 조회를 사용한다.
+  /// interval(격자)·요약을 제외한 uid 보유 타입은 변경 피드가 수집 default.
   Future<HealthChanges> queryChanges(String dataType, {DateTime? since, DateTime? to, String? token}) =>
       FlutterHealthPlatform.instance.queryChanges(dataType, since: since, to: to, token: token);
 }

@@ -43,17 +43,6 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
   Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) =>
       _queryList('queryCalories', since, to);
 
-  @override
-  Future<List<HealthRecord>> queryStepsDaily(DateTime date) async {
-    final List? result;
-    try {
-      result = await methodChannel.invokeMethod<List>(
-          'queryStepsDaily', {'date': date.toIso8601String().substring(0, 10)});
-    } on MissingPluginException {
-      return const [];
-    }
-    return _toRecordsNewestFirst(result);
-  }
 
   @override
   Future<List<HealthRecord>> queryEndedSleepSessions(DateTime since, DateTime to) =>
@@ -102,10 +91,6 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
   @override
   Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
       _queryList('queryWaterIntake', since, to);
-
-  @override
-  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
-      _queryList('queryStepSegments', since, to);
 
   @override
   Future<List<HealthRecord>> queryHeight(DateTime since, DateTime to) =>

@@ -39,9 +39,6 @@ class MockFlutterHealthPlatform
       Future.value([]);
 
   @override
-  Future<List<HealthRecord>> queryStepsDaily(DateTime date) => Future.value([]);
-
-  @override
   Future<List<HealthRecord>> queryEndedSleepSessions(
           DateTime since, DateTime to) =>
       Future.value([]);
@@ -82,10 +79,6 @@ class MockFlutterHealthPlatform
 
   @override
   Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
-      Future.value([]);
-
-  @override
-  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
       Future.value([]);
 
   @override

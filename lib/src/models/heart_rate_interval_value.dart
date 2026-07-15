@@ -1,4 +1,4 @@
-/// 심박수(heart_rate_interval) — **벽시계 10분 격자 버킷**의 평균/최소/최대(bpm). metric 에서 분리된 독립 타입.
+/// 심박수(heart_rate_interval) — **벽시계 10분 격자 버킷**의 평균/최소/최대(bpm).
 /// envelope 의 timestamp/endTimestamp 가 격자 경계(예: 09:00~09:10)이며, 값은 그 10분 구간의 집계.
 class HeartRateIntervalValue {
   final int? avg; // 구간 평균 심박수 (bpm)

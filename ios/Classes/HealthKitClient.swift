@@ -66,7 +66,7 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// 심박수를 **벽시계 10분 격자 버킷**(예: 09:00~09:10)별 평균/최소/최대(bpm)로 반환. metric 에서 분리된 독립 타입(heart_rate_interval).
+    /// 심박수를 **벽시계 10분 격자 버킷**(예: 09:00~09:10)별 평균/최소/최대(bpm)로 반환.
     func queryHeartRate(since: Date, to: Date) async -> [HealthRecord] {
         let unit = HKUnit(from: "count/min")
         let buckets = await queryGridBuckets(.heartRate, options: [.discreteAverage, .discreteMin, .discreteMax], since: since, to: to)
@@ -83,30 +83,20 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// iOS 걸음은 step_segment(per-sample, queryStepSegments)로 수집 → steps_interval 미수집.
-    /// STEPS_INTERVAL(10분 격자)은 Android(SamsungHealthClient) 전용. querySteps 는 공용 API 라 시그니처만 유지하고 빈 리스트 반환.
-    func querySteps(since: Date, to: Date) async -> [HealthRecord] { [] }
-
-    /// 걸음 활동 구간 — stepCount 샘플을 각각 시작/종료/걸음수로 반환(iOS 전용).
-    /// iPhone·워치가 동시 기록하면 시간 겹치는 샘플이 함께 옴 → sourceType 으로 구분.
-    func queryStepSegments(since: Date, to: Date) async -> [HealthRecord] {
-        await queryQuantitySamples(.stepCount, unit: .count(), dataType: Self.dataTypeStepSegment, since: since, to: to) { v, sample in
-            let count = Int(v)
-            return count > 0 ? StepSegmentValue(count: count, sourceType: Self.stepSourceType(sample)) : nil
+    /// 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환. 양 플랫폼 공통.
+    /// HKStatistics 가 iPhone·워치 multi-source 를 자동 중복 제거하므로 버킷 합 = 정확한 걸음 수.
+    func querySteps(since: Date, to: Date) async -> [HealthRecord] {
+        let buckets = await queryGridBuckets(.stepCount, options: .cumulativeSum, since: since, to: to)
+        let tz = currentTzOffset()
+        let createdAt = toMs(Date())
+        return buckets.compactMap { b in
+            guard let c = b.stats.sumQuantity()?.doubleValue(for: .count()), c > 0 else { return nil }
+            let value = StepsIntervalValue(count: Int(c))
+            return HealthRecord(dataType: Self.dataTypeStepsInterval, timestamp: toMs(b.start), endTimestamp: toMs(b.end), tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
         }
     }
 
-    /// 기록 기기 종류를 phone|watch|tablet|other 로 정규화(기기명 대신).
-    /// HKDevice 이름 또는 모델 식별자(예: "iPhone14,5", "Watch6,18")로 판별.
-    private static func stepSourceType(_ sample: HKSample) -> String {
-        let raw = (sample.device?.name ?? sample.sourceRevision.productType ?? "").lowercased()
-        if raw.contains("watch") { return "watch" }
-        if raw.contains("iphone") { return "phone" }
-        if raw.contains("ipad") { return "tablet" }
-        return "other"
-    }
-
-    /// 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환. metric 에서 분리된 독립 타입.
+    /// 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환.
     func queryDistance(since: Date, to: Date) async -> [HealthRecord] {
         let buckets = await queryGridBuckets(.distanceWalkingRunning, options: .cumulativeSum, since: since, to: to)
         let tz = currentTzOffset()
@@ -119,7 +109,7 @@ final class HealthKitClient: @unchecked Sendable {
     }
 
     /// 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total=활동+기초대사·active=활동, kcal)으로 반환.
-    /// metric 에서 분리된 독립 타입. active·basal 격자를 각각 구해 버킷 시작 기준으로 병합한다.
+    /// active·basal 격자를 각각 구해 버킷 시작 기준으로 병합한다.
     func queryCalories(since: Date, to: Date) async -> [HealthRecord] {
         async let activeB = queryGridBuckets(.activeEnergyBurned, options: .cumulativeSum, since: since, to: to)
         async let basalB = queryGridBuckets(.basalEnergyBurned, options: .cumulativeSum, since: since, to: to)
@@ -140,14 +130,6 @@ final class HealthKitClient: @unchecked Sendable {
             let value = CaloriesIntervalValue(total: total, active: active[startMs])
             return HealthRecord(dataType: Self.dataTypeCaloriesInterval, timestamp: startMs, endTimestamp: startMs + bucketMs, tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
         }
-    }
-
-    /// 당일 누적 걸음 수(steps_daily) 1건 — [date] 가 가리키는 날 자정~수집 시점 누적. metric 에서 분리된 독립 타입.
-    func queryStepsDaily(date: Date) async -> [HealthRecord] {
-        let dayStart = Calendar.current.startOfDay(for: date)
-        guard let total = await querySumBucketed(.stepCount, unit: .count(), bucketStart: dayStart, interval: DateComponents(day: 1)), total > 0 else { return [] }
-        let value = StepsDailyValue(count: Int(total))
-        return [HealthRecord(dataType: Self.dataTypeStepsDaily, timestamp: toMs(dayStart), endTimestamp: toMs(Date()), tzOffset: currentTzOffset(), source: Self.source, valueJson: encodeToJson(value), createdAt: toMs(Date()))]
     }
 
     func queryEndedSleepSessions(since: Date, to: Date) async -> [HealthRecord] {
@@ -573,7 +555,7 @@ final class HealthKitClient: @unchecked Sendable {
     /// - anchorToken(base64) 이 있으면 그 시점 이후 **델타만**(추가/삭제), 없으면 since~to 범위 전량이 기준선.
     /// - HealthKit 의 "수정"은 구 uuid 삭제 + 신 uuid 추가로 오므로, 수정 시 신규는 upserted, 구본은 deletedUids 에 나온다.
     /// - deletedObjects 는 anchor 확립 이후 삭제분만 잡히므로 반드시 (기준선 호출 → 편집/삭제 → 재호출) 순서로 검증.
-    /// - 수면·영양은 델타가 raw 조각으로만 온다(수면=단계 조각 / 영양=섭취에너지 샘플) → 추가분이 있으면 그 구간을 정식 빌더로 재조회해 완전한 레코드(수면=병합 세션 / 영양=영양소 per-sample 전체)로 반환한다.
+    /// - anchored 델타는 raw/부분 샘플로만 와서 저장 스키마가 불완전하다 → uid 타입은 추가분 구간을 정식 조회로 재조회해 완전 레코드로 대체한다(수면=병합 세션 / 영양=영양소 per-sample / 체중=weight+bmi+체지방률 / 혈당·혈압·수분=측정 전체). 운동(HKWorkout)만 그 자체로 완전해 재조회 없이 변환.
     func queryChanges(dataType: String, since: Date, to: Date, anchorToken: String?) async -> (upserted: [HealthRecord], deletedUids: [String], token: String?) {
         guard let sampleType = Self.sampleType(forDataType: dataType) else { return ([], [], nil) }
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: [])
@@ -588,24 +570,30 @@ final class HealthKitClient: @unchecked Sendable {
             }
             self.store.execute(query)
         }
-        // 2-a) 수면·영양: anchored 델타는 raw 조각으로만 온다(수면=단계 조각 여러 개 / 영양=섭취에너지 샘플).
-        //      added 가 있으면 그 최소 시작시각~현재를 정식 빌더로 재조회해 완전한 레코드로 대체한다
-        //      (수면=30분 병합 세션 1건 / 영양=영양소별 per-sample 전체). added 가 비면 삭제뿐 → deletedUids·token 만 반환.
-        if dataType == Self.dataTypeSleep || dataType == "nutrition" || dataType == "nutrition_energy" {
+        // 2-a) uid 타입 재조회 — anchored 로 감지한 added 구간을 정식 조회로 다시 읽어 완전 레코드로 대체.
+        switch dataType {
+        case Self.dataTypeSleep, "nutrition", "nutrition_energy",
+             Self.dataTypeWeight, Self.dataTypeBloodGlucose, Self.dataTypeBloodPressure, Self.dataTypeWaterIntake:
+            // added 비면 삭제뿐 → deletedUids·token 만 반환.
             guard let spanStart = added.map({ $0.startDate }).min() else { return ([], deletedUids, token) }
-            let full = dataType == Self.dataTypeSleep
-                ? await queryEndedSleepSessions(since: spanStart, to: Date())
-                : await queryNutrition(since: spanStart, to: Date())
+            let full: [HealthRecord]
+            switch dataType {
+            case Self.dataTypeSleep:         full = await queryEndedSleepSessions(since: spanStart, to: Date())
+            case Self.dataTypeWeight:        full = await queryWeights(since: spanStart, to: Date())
+            case Self.dataTypeBloodGlucose:  full = await queryBloodGlucose(since: spanStart, to: Date())
+            case Self.dataTypeBloodPressure: full = await queryBloodPressure(since: spanStart, to: Date())
+            case Self.dataTypeWaterIntake:   full = await queryWaterIntake(since: spanStart, to: Date())
+            default:                         full = await queryNutrition(since: spanStart, to: Date()) // nutrition, nutrition_energy
+            }
             return (full, deletedUids, token)
+        default:
+            break
         }
-        // 2-b) 그 외(운동·체중·혈당 등) 추가 샘플 → 개별 레코드. 운동은 완전 빌더 재사용, 나머지는 최소 레코드(uid+시각+원본값).
+        // 2-b) 운동(exercise) — HKWorkout 은 그 자체로 완전 레코드라 재조회 없이 빌더로 변환(재조회 분기 밖은 exercise 뿐).
         let tz = currentTzOffset()
-        let now = toMs(Date())
         var records: [HealthRecord] = []
         for sample in added {
-            if let workout = sample as? HKWorkout {
-                if let r = await buildExerciseRecord(workout, tz: tz) { records.append(r) }
-            } else if let r = buildChangeRecord(sample, dataType: dataType, tz: tz, now: now) {
+            if let workout = sample as? HKWorkout, let r = await buildExerciseRecord(workout, tz: tz) {
                 records.append(r)
             }
         }
@@ -620,27 +608,14 @@ final class HealthKitClient: @unchecked Sendable {
         case dataTypeWeight:        return HKObjectType.quantityType(forIdentifier: .bodyMass)
         case dataTypeBloodGlucose:  return HKObjectType.quantityType(forIdentifier: .bloodGlucose)
         case dataTypeWaterIntake:   return HKObjectType.quantityType(forIdentifier: .dietaryWater)
-        case dataTypeBloodPressure: return HKObjectType.correlationType(forIdentifier: .bloodPressure)
+        // correlation 은 read set/조회에서 크래시 이슈 → systolic 컴포넌트로 변경 감지(완전값은 재조회 queryBloodPressure 가 생성).
+        case dataTypeBloodPressure: return HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)
         // 영양은 섭취 에너지(대표 1종)로 처리 — 실제로는 영양소별 개별 샘플이라 각자 uid 를 가진다.
         case "nutrition", "nutrition_energy": return HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)
         default: return nil
         }
     }
 
-    /// 운동 외 샘플을 최소 레코드로 변환(uid + 시작/종료 + 원본값 요약). 값 완전성보다 uid·변경신호 식별이 목적.
-    private func buildChangeRecord(_ sample: HKSample, dataType: String, tz: String, now: Int64) -> HealthRecord? {
-        let start = toMs(sample.startDate)
-        let end = toMs(sample.endDate)
-        var valueJson = "{}"
-        if let cat = sample as? HKCategorySample {
-            // 수면 등 카테고리 — 세션 병합 전 raw 조각(단계값+지속분)이 그대로 노출됨.
-            valueJson = encodeToJson(ChangeCategoryValue(categoryValue: cat.value, durationMin: Int((end - start) / 60000)))
-        } else if let q = sample as? HKQuantitySample {
-            // 수량 — 단위 불일치 크래시 방지를 위해 HKQuantity.description(예 "72 count/min")을 그대로 담는다.
-            valueJson = encodeToJson(ChangeQuantityValue(quantity: q.quantity.description))
-        }
-        return HealthRecord(dataType: dataType, timestamp: start, endTimestamp: end, tzOffset: tz, source: Self.source, valueJson: valueJson, createdAt: now, uid: sample.uuid.uuidString)
-    }
 
     /// HKQueryAnchor ↔ base64 문자열(Dart 왕복용). NSSecureCoding 아카이빙.
     private static func encodeAnchor(_ anchor: HKQueryAnchor) -> String? {
@@ -743,7 +718,7 @@ final class HealthKitClient: @unchecked Sendable {
 
     /// 일/시 집계 전용 버킷 합산. 단순 overlap-sum 은 경계(자정/정시)를 가로지른 누적 샘플을 전량 더해 over-count 된다.
     /// HKStatisticsCollectionQuery 가 경계 샘플을 시간비례로 나누고 multi-source 를 자동 중복 제거 → Apple 건강 UI 와 일치.
-    /// bucketStart 에 맞춘 단일 버킷의 합만 반환(steps_daily·hourly/daily summary 의 일/시 누적용).
+    /// bucketStart 에 맞춘 단일 버킷의 합만 반환(hourly/daily summary 의 일/시 누적용).
     private func querySumBucketed(
         _ identifier: HKQuantityTypeIdentifier,
         unit: HKUnit,
@@ -967,33 +942,27 @@ final class HealthKitClient: @unchecked Sendable {
 
     // MARK: - valueJson 직렬화용 Codable 구조체
 
-    /// 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate_interval).
+    /// 심박수 10분 격자 버킷 값(bpm).
     private struct HeartRateIntervalValue: Codable {
         let avg: Int?
         let min: Int?
         let max: Int?
     }
 
-    /// 걸음 활동 구간 값(step_segment, iOS 전용). 개별 stepCount 샘플의 걸음수 + 기록 기기 종류.
-    fileprivate struct StepSegmentValue: Codable {
+    /// 걸음 10분 격자 버킷 값(count).
+    private struct StepsIntervalValue: Codable {
         let count: Int
-        let sourceType: String       // 기록 기기 종류: "phone"|"watch"|"tablet"|"other" (사용자 지정 기기명 대신 정규화)
     }
 
-    /// 이동 거리 10분 격자 버킷 값(m). metric 에서 분리된 독립 타입(distance_interval).
+    /// 이동 거리 10분 격자 버킷 값(m).
     private struct DistanceIntervalValue: Codable {
         let distance: Double
     }
 
-    /// 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동. metric 에서 분리된 독립 타입(calories_interval).
+    /// 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동.
     private struct CaloriesIntervalValue: Codable {
         let total: Double
         let active: Double?
-    }
-
-    /// 당일 누적 걸음 수. metric 에서 분리된 독립 타입(steps_daily).
-    private struct StepsDailyValue: Codable {
-        let count: Int
     }
 
     fileprivate struct SleepValue: Codable {
@@ -1061,17 +1030,6 @@ final class HealthKitClient: @unchecked Sendable {
         let height: Double           // cm
     }
 
-    /// 변경 피드 — 카테고리(수면 등) raw 조각 값.
-    private struct ChangeCategoryValue: Codable {
-        let categoryValue: Int
-        let durationMin: Int
-    }
-
-    /// 변경 피드 — 수량 샘플 원본값 문자열(단위 포함).
-    private struct ChangeQuantityValue: Codable {
-        let quantity: String
-    }
-
     private struct DailySummaryValue: Codable {
         let date: String
         let heartRateAvg: Int?
@@ -1092,9 +1050,9 @@ final class HealthKitClient: @unchecked Sendable {
 
     static let bucketMinutes = 10
     static let dataTypeHeartRateInterval = "heart_rate_interval"
+    static let dataTypeStepsInterval = "steps_interval"
     static let dataTypeDistanceInterval = "distance_interval"
     static let dataTypeCaloriesInterval = "calories_interval"
-    static let dataTypeStepsDaily = "steps_daily"
     static let dataTypeSleep = "sleep"
     static let dataTypeExercise = "exercise"
     static let dataTypeHourlySummary = "hourly_summary"
@@ -1107,7 +1065,6 @@ final class HealthKitClient: @unchecked Sendable {
     static let dataTypeInsulinDelivery = "insulin_delivery"
     static let dataTypeWaterIntake = "water_intake"
     static let dataTypeHeight = "height"
-    static let dataTypeStepSegment = "step_segment"
     static let source = "apple_health"
 }
 

@@ -123,7 +123,7 @@ class SamsungHealthClient(private val context: Context) {
     }
 
     /**
-     * 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환한다. metric 에서 분리된 독립 타입.
+     * 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환한다.
      * Samsung 그룹 집계(LocalTimeGroup MINUTELY×10)로 한 번에 전 버킷을 받고, **완료된(닫힌) 칸만** 내보낸다.
      */
     suspend fun querySteps(since: Long, to: Long): List<HealthRecord> {
@@ -139,7 +139,7 @@ class SamsungHealthClient(private val context: Context) {
     }
 
     /**
-     * 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환한다. metric 에서 분리된 독립 타입.
+     * 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환한다.
      */
     suspend fun queryDistance(since: Long, to: Long): List<HealthRecord> {
         val s = store ?: return emptyList()
@@ -155,7 +155,7 @@ class SamsungHealthClient(private val context: Context) {
 
     /**
      * 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total=활동+기초대사·active=활동, kcal)으로 반환한다.
-     * metric 에서 분리된 독립 타입. total/active 격자를 각각 받아 버킷 시작 기준으로 병합한다.
+     * total/active 격자를 각각 받아 버킷 시작 기준으로 병합한다.
      */
     suspend fun queryCalories(since: Long, to: Long): List<HealthRecord> = coroutineScope {
         val s = store ?: return@coroutineScope emptyList()
@@ -171,22 +171,6 @@ class SamsungHealthClient(private val context: Context) {
             HealthRecord(DATA_TYPE_CALORIES_INTERVAL, startMs, startMs + BUCKET_MS, tz, SOURCE,
                 json.encodeToString(CaloriesIntervalValue(total = total, active = active)), now)
         }.sortedByDescending { it.timestamp }
-    }
-
-    /**
-     * 당일 누적 걸음 수(steps_daily) 1건 — [date] 가 가리키는 날 자정~수집 시점 누적. metric 에서 분리된 독립 타입.
-     */
-    suspend fun queryStepsDaily(date: LocalDate): List<HealthRecord> {
-        val s = store ?: return emptyList()
-        val zone = ZoneId.systemDefault()
-        val dayStartMs = date.atStartOfDay(zone).toInstant().toEpochMilli()
-        val nowMs = System.currentTimeMillis()
-        val endMs = minOf(date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli(), nowMs)
-        if (endMs <= dayStartMs) return emptyList()
-        val filter = LocalTimeFilter.of(dayStartMs.toLocalDateTime(), endMs.toLocalDateTime())
-        val count = aggregateSteps(s, filter)?.takeIf { it > 0 } ?: return emptyList()
-        return listOf(HealthRecord(DATA_TYPE_STEPS_DAILY, dayStartMs, nowMs, currentTzOffset(), SOURCE,
-            json.encodeToString(StepsDailyValue(count)), nowMs))
     }
 
     /** [since]~[to] 구간에 종료된 수면 세션 목록을 반환한다. */
@@ -358,29 +342,16 @@ class SamsungHealthClient(private val context: Context) {
             s.readData(request).dataList
                 .sortedByDescending { it.startTime?.toEpochMilli() ?: 0L }
                 .mapNotNull { point ->
-                    val weight = point.getValueOrDefault(DataType.BodyCompositionType.WEIGHT, 0f)
-                    if (weight <= 0f) return@mapNotNull null
-
-                    fun bcf(field: com.samsung.android.sdk.health.data.data.Field<Float>): Double? =
-                        point.getValueOrDefault(field, 0f).let { if (it > 0f) it.toDouble() else null }
-
-                    val bmi = bcf(DataType.BodyCompositionType.BODY_MASS_INDEX)
-                    val bodyFat = bcf(DataType.BodyCompositionType.BODY_FAT)
-
+                    val value = weightValueOf(point) ?: return@mapNotNull null
                     val startMs = point.startTime?.toEpochMilli() ?: since
                     val endMs = point.endTime?.toEpochMilli() ?: startMs
-
                     HealthRecord(
                         dataType = DATA_TYPE_WEIGHT,
                         timestamp = startMs,
                         endTimestamp = endMs,
                         tzOffset = tz,
                         source = SOURCE,
-                        valueJson = json.encodeToString(WeightValue(
-                            weight = weight.toDouble(),
-                            bmi = bmi,
-                            bodyFat = bodyFat
-                        )),
+                        valueJson = json.encodeToString(value),
                         createdAt = now,
                         uid = point.uid,
                     )
@@ -391,36 +362,14 @@ class SamsungHealthClient(private val context: Context) {
     /** [since]~[to] 구간 내 모든 혈당 측정 목록. */
     suspend fun queryBloodGlucose(since: Long, to: Long): List<HealthRecord> =
         readPoints(since, to, DataTypes.BLOOD_GLUCOSE, "혈당") { point, startMs, endMs, tz, now ->
-            val glucose = runCatching { point.getValue(DataType.BloodGlucoseType.GLUCOSE_LEVEL) }.getOrNull()
-                ?: point.getValueOrDefault(DataType.BloodGlucoseType.GLUCOSE_LEVEL, 0f)
-            if (glucose <= 0f) return@readPoints null
-            val mealStatus = runCatching { point.getValue(DataType.BloodGlucoseType.MEAL_STATUS) }
-                .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase()
-            val insulin = runCatching { point.getValue(DataType.BloodGlucoseType.INSULIN_INJECTED) }
-                .getOrNull()?.let { if (it > 0f) it.toDouble() else null }
-            val medication = runCatching { point.getValue(DataType.BloodGlucoseType.MEDICATION_TAKEN) }
-                .getOrNull()
-            val series = runCatching { point.getValue(DataType.BloodGlucoseType.SERIES_DATA) }
-                .getOrNull()?.takeIf { it.isNotEmpty() }?.map {
-                    BloodGlucoseSeriesEntry(
-                        glucose = it.glucose.toDouble() * MMOL_L_TO_MG_DL,
-                        timestampMs = it.timestamp.toEpochMilli()
-                    )
-                }
-
+            val value = bloodGlucoseValueOf(point) ?: return@readPoints null
             HealthRecord(
                 dataType = DATA_TYPE_BLOOD_GLUCOSE,
                 timestamp = startMs,
                 endTimestamp = endMs,
                 tzOffset = tz,
                 source = SOURCE,
-                valueJson = json.encodeToString(BloodGlucoseValue(
-                    glucose = glucose.toDouble() * MMOL_L_TO_MG_DL, // Samsung SDK raw=mmol/L → mg/dL (iOS·스키마 통일)
-                    mealStatus = mealStatus,
-                    insulinInjected = insulin,
-                    medicationTaken = medication,
-                    series = series
-                )),
+                valueJson = json.encodeToString(value),
                 createdAt = now,
                 uid = point.uid,
             )
@@ -429,28 +378,14 @@ class SamsungHealthClient(private val context: Context) {
     /** [since]~[to] 구간 내 모든 혈압 측정 목록. */
     suspend fun queryBloodPressure(since: Long, to: Long): List<HealthRecord> =
         readPoints(since, to, DataTypes.BLOOD_PRESSURE, "혈압") { point, startMs, endMs, tz, now ->
-            val systolic = runCatching { point.getValue(DataType.BloodPressureType.SYSTOLIC) }.getOrNull()
-            val diastolic = runCatching { point.getValue(DataType.BloodPressureType.DIASTOLIC) }.getOrNull()
-            if (systolic == null || diastolic == null || systolic <= 0f || diastolic <= 0f) return@readPoints null
-            val mean = runCatching { point.getValue(DataType.BloodPressureType.MEAN) }.getOrNull()
-                ?.let { if (it > 0f) it.toDouble() else null }
-            val pulseRate = runCatching { point.getValue(DataType.BloodPressureType.PULSE_RATE) }.getOrNull()
-                ?.takeIf { it > 0 }
-            val medication = runCatching { point.getValue(DataType.BloodPressureType.MEDICATION_TAKEN) }.getOrNull()
-
+            val value = bloodPressureValueOf(point) ?: return@readPoints null
             HealthRecord(
                 dataType = DATA_TYPE_BLOOD_PRESSURE,
                 timestamp = startMs,
                 endTimestamp = endMs,
                 tzOffset = tz,
                 source = SOURCE,
-                valueJson = json.encodeToString(BloodPressureValue(
-                    systolic = systolic.toDouble(),
-                    diastolic = diastolic.toDouble(),
-                    mean = mean,
-                    pulseRate = pulseRate,
-                    medicationTaken = medication
-                )),
+                valueJson = json.encodeToString(value),
                 createdAt = now,
                 uid = point.uid,
             )
@@ -514,6 +449,72 @@ class SamsungHealthClient(private val context: Context) {
         )
     }
 
+    /** 체성분 포인트 → weight(+bmi/체지방률) 값. weight 없으면 null. queryWeights·변경 피드 공용. */
+    private fun weightValueOf(point: HealthDataPoint): WeightValue? {
+        val weight = point.getValueOrDefault(DataType.BodyCompositionType.WEIGHT, 0f)
+        if (weight <= 0f) return null
+        fun bcf(field: com.samsung.android.sdk.health.data.data.Field<Float>): Double? =
+            point.getValueOrDefault(field, 0f).let { if (it > 0f) it.toDouble() else null }
+        return WeightValue(
+            weight = weight.toDouble(),
+            bmi = bcf(DataType.BodyCompositionType.BODY_MASS_INDEX),
+            bodyFat = bcf(DataType.BodyCompositionType.BODY_FAT)
+        )
+    }
+
+    /** 혈당 포인트 → 값(mmol/L→mg/dL). 유효 혈당 없으면 null. queryBloodGlucose·변경 피드 공용. */
+    private fun bloodGlucoseValueOf(point: HealthDataPoint): BloodGlucoseValue? {
+        val glucose = runCatching { point.getValue(DataType.BloodGlucoseType.GLUCOSE_LEVEL) }.getOrNull()
+            ?: point.getValueOrDefault(DataType.BloodGlucoseType.GLUCOSE_LEVEL, 0f)
+        if (glucose <= 0f) return null
+        val mealStatus = runCatching { point.getValue(DataType.BloodGlucoseType.MEAL_STATUS) }
+            .getOrNull()?.name?.takeIf { it != "UNDEFINED" }?.lowercase()
+        val insulin = runCatching { point.getValue(DataType.BloodGlucoseType.INSULIN_INJECTED) }
+            .getOrNull()?.let { if (it > 0f) it.toDouble() else null }
+        val medication = runCatching { point.getValue(DataType.BloodGlucoseType.MEDICATION_TAKEN) }
+            .getOrNull()
+        val series = runCatching { point.getValue(DataType.BloodGlucoseType.SERIES_DATA) }
+            .getOrNull()?.takeIf { it.isNotEmpty() }?.map {
+                BloodGlucoseSeriesEntry(
+                    glucose = it.glucose.toDouble() * MMOL_L_TO_MG_DL,
+                    timestampMs = it.timestamp.toEpochMilli()
+                )
+            }
+        return BloodGlucoseValue(
+            glucose = glucose.toDouble() * MMOL_L_TO_MG_DL,
+            mealStatus = mealStatus,
+            insulinInjected = insulin,
+            medicationTaken = medication,
+            series = series
+        )
+    }
+
+    /** 혈압 포인트 → 값. systolic/diastolic 없으면 null. queryBloodPressure·변경 피드 공용. */
+    private fun bloodPressureValueOf(point: HealthDataPoint): BloodPressureValue? {
+        val systolic = runCatching { point.getValue(DataType.BloodPressureType.SYSTOLIC) }.getOrNull()
+        val diastolic = runCatching { point.getValue(DataType.BloodPressureType.DIASTOLIC) }.getOrNull()
+        if (systolic == null || diastolic == null || systolic <= 0f || diastolic <= 0f) return null
+        val mean = runCatching { point.getValue(DataType.BloodPressureType.MEAN) }.getOrNull()
+            ?.let { if (it > 0f) it.toDouble() else null }
+        val pulseRate = runCatching { point.getValue(DataType.BloodPressureType.PULSE_RATE) }.getOrNull()
+            ?.takeIf { it > 0 }
+        val medication = runCatching { point.getValue(DataType.BloodPressureType.MEDICATION_TAKEN) }.getOrNull()
+        return BloodPressureValue(
+            systolic = systolic.toDouble(),
+            diastolic = diastolic.toDouble(),
+            mean = mean,
+            pulseRate = pulseRate,
+            medicationTaken = medication
+        )
+    }
+
+    /** 수분 포인트 → 값. amount 없으면 null. queryWaterIntake·변경 피드 공용. */
+    private fun waterIntakeValueOf(point: HealthDataPoint): WaterIntakeValue? {
+        val amount = runCatching { point.getValue(DataType.WaterIntakeType.AMOUNT) }.getOrNull()
+        if (amount == null || amount <= 0f) return null
+        return WaterIntakeValue(amount = amount.toDouble())
+    }
+
     /**
      * [since]~[to] 구간 내 모든 수분 섭취 기록.
      * 반환은 표시 일관성 위해 최신순(내림차순).
@@ -527,8 +528,7 @@ class SamsungHealthClient(private val context: Context) {
             val now = System.currentTimeMillis()
 
             s.readData(request).dataList.mapNotNull { point ->
-                val amount = runCatching { point.getValue(DataType.WaterIntakeType.AMOUNT) }.getOrNull()
-                if (amount == null || amount <= 0f) return@mapNotNull null
+                val value = waterIntakeValueOf(point) ?: return@mapNotNull null
                 val startMs = point.startTime?.toEpochMilli() ?: return@mapNotNull null
                 HealthRecord(
                     dataType = DATA_TYPE_WATER_INTAKE,
@@ -536,7 +536,7 @@ class SamsungHealthClient(private val context: Context) {
                     endTimestamp = point.endTime?.toEpochMilli() ?: startMs,
                     tzOffset = tz,
                     source = SOURCE,
-                    valueJson = json.encodeToString(WaterIntakeValue(amount = amount.toDouble())),
+                    valueJson = json.encodeToString(value),
                     createdAt = now,
                     uid = point.uid,
                 )
@@ -818,28 +818,28 @@ class SamsungHealthClient(private val context: Context) {
         else -> null
     }
 
-    /** 변경 피드 UPSERT 데이터포인트 → HealthRecord. 세션형(수면·운동)·영양은 완전 빌더, 그 외는 최소 레코드. */
+    /** 변경 피드 UPSERT 데이터포인트 → HealthRecord. 정식 조회와 동일한 완전 value 빌더(valueOf) 재사용. */
     private fun buildChangeRecord(dataType: String, point: HealthDataPoint): HealthRecord? = when (dataType) {
         DATA_TYPE_SLEEP -> buildSleepRecord(point)
         DATA_TYPE_EXERCISE -> buildExerciseRecord(point)
-        DATA_TYPE_NUTRITION -> {
-            // 정식 조회(queryNutrition)와 동일하게 전체 영양소(19필드)를 담아 완전한 레코드로 반환.
-            val startMs = point.startTime?.toEpochMilli() ?: return null
-            val endMs = point.endTime?.toEpochMilli() ?: startMs
-            val value = nutritionValueOf(point) ?: return null
-            HealthRecord(dataType, startMs, endMs, currentTzOffset(), SOURCE, json.encodeToString(value), System.currentTimeMillis(), uid = point.uid)
-        }
-        else -> {
-            // 변경 피드 소비 대상 아님(혈당·혈압·체중·물) — uid+시각 최소 레코드.
-            val startMs = point.startTime?.toEpochMilli() ?: return null
-            val endMs = point.endTime?.toEpochMilli() ?: startMs
-            HealthRecord(dataType, startMs, endMs, currentTzOffset(), SOURCE, "{}", System.currentTimeMillis(), uid = point.uid)
-        }
+        DATA_TYPE_NUTRITION -> nutritionValueOf(point)?.let { changeRecord(dataType, point, json.encodeToString(it)) }
+        DATA_TYPE_WEIGHT -> weightValueOf(point)?.let { changeRecord(dataType, point, json.encodeToString(it)) }
+        DATA_TYPE_BLOOD_GLUCOSE -> bloodGlucoseValueOf(point)?.let { changeRecord(dataType, point, json.encodeToString(it)) }
+        DATA_TYPE_BLOOD_PRESSURE -> bloodPressureValueOf(point)?.let { changeRecord(dataType, point, json.encodeToString(it)) }
+        DATA_TYPE_WATER_INTAKE -> waterIntakeValueOf(point)?.let { changeRecord(dataType, point, json.encodeToString(it)) }
+        else -> null
+    }
+
+    /** 변경 피드 레코드 조립 — startTime 없으면 null(정식 조회와 동일 규칙). */
+    private fun changeRecord(dataType: String, point: HealthDataPoint, valueJson: String): HealthRecord? {
+        val startMs = point.startTime?.toEpochMilli() ?: return null
+        val endMs = point.endTime?.toEpochMilli() ?: startMs
+        return HealthRecord(dataType, startMs, endMs, currentTzOffset(), SOURCE, valueJson, System.currentTimeMillis(), uid = point.uid)
     }
 
     // --- valueJson 직렬화용 내부 데이터 클래스 ---
 
-    /** 심박수 10분 격자 버킷 값(bpm). metric 에서 분리된 독립 타입(heart_rate_interval). */
+    /** 심박수 10분 격자 버킷 값(bpm). */
     @Serializable
     private data class HeartRateIntervalValue(
         val avg: Int?,
@@ -847,21 +847,18 @@ class SamsungHealthClient(private val context: Context) {
         val max: Int?
     )
 
-    /** 걸음 10분 격자 버킷 값. metric 에서 분리된 독립 타입(steps_interval). */
+    /** 걸음 10분 격자 버킷 값. */
     @Serializable
     private data class StepsIntervalValue(val count: Int)
 
-    /** 이동 거리 10분 격자 버킷 값(m). metric 에서 분리된 독립 타입(distance_interval). */
+    /** 이동 거리 10분 격자 버킷 값(m). */
     @Serializable
     private data class DistanceIntervalValue(val distance: Double)
 
-    /** 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동. metric 에서 분리된 독립 타입(calories_interval). */
+    /** 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동. */
     @Serializable
     private data class CaloriesIntervalValue(val total: Double, val active: Double? = null)
 
-    /** 당일 누적 걸음 수. metric 에서 분리된 독립 타입(steps_daily). */
-    @Serializable
-    private data class StepsDailyValue(val count: Int)
 
     @Serializable
     private data class SleepValue(
@@ -981,7 +978,6 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_STEPS_INTERVAL = "steps_interval"
         const val DATA_TYPE_DISTANCE_INTERVAL = "distance_interval"
         const val DATA_TYPE_CALORIES_INTERVAL = "calories_interval"
-        const val DATA_TYPE_STEPS_DAILY = "steps_daily"
         const val DATA_TYPE_SLEEP = "sleep"
         const val DATA_TYPE_EXERCISE = "exercise"
         const val DATA_TYPE_HOURLY_SUMMARY = "hourly_summary"

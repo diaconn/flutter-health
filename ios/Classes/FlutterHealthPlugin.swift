@@ -41,24 +41,6 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-        case "queryStepsDaily":
-            guard let args    = call.arguments as? [String: Any],
-                  let dateStr = args["date"] as? String else {
-                result(FlutterError(code: "INVALID_ARGS", message: "date required", details: nil))
-                return
-            }
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            formatter.timeZone = TimeZone.current
-            guard let date = formatter.date(from: dateStr) else {
-                result(FlutterError(code: "INVALID_ARGS", message: "date format must be yyyy-MM-dd", details: nil))
-                return
-            }
-            Task {
-                let records = await client.queryStepsDaily(date: date)
-                DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
-            }
-
         case "queryEndedSleepSessions":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
@@ -159,7 +141,7 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
 
         case "queryHeartRate", "querySteps", "queryDistance", "queryCalories",
              "queryBloodGlucose", "queryBloodPressure", "queryInsulinDelivery", "queryNutrition", "queryWaterIntake",
-             "queryStepSegments", "queryHeight":
+             "queryHeight":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
                   let toMs    = args["to"]    as? Int else {
@@ -181,7 +163,6 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 case "queryInsulinDelivery":      records = await client.queryInsulinDelivery(since: since, to: to)
                 case "queryNutrition":            records = await client.queryNutrition(since: since, to: to)
                 case "queryWaterIntake":          records = await client.queryWaterIntake(since: since, to: to)
-                case "queryStepSegments":         records = await client.queryStepSegments(since: since, to: to)
                 case "queryHeight":               records = await client.queryHeight(since: since, to: to)
                 default:                          records = []
                 }

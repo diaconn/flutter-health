@@ -83,7 +83,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     }
   }
 
-  /// metric 에서 분리된 10분 격자 버킷 타입들(heart_rate_interval·steps_interval·distance_interval·calories_interval).
+  /// 10분 격자 버킷 타입들(heart_rate_interval·steps_interval·distance_interval·calories_interval).
   /// 데모는 최근 1시간을 조회해 여러 10분 버킷이 보이게 한다(닫힌 칸만 반환).
   Future<void> _queryInterval(String name) async {
     final to = DateTime.now();
@@ -102,23 +102,12 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     }
   }
 
-  /// 당일 누적 걸음(steps_daily) — 오늘 자정~지금 누적 1건.
-  Future<void> _queryStepsDaily() async {
-    try {
-      final records = await _plugin.queryStepsDaily(DateTime.now());
-      _logRecords('steps_daily → ${records.length} record(s)', records, (r) => '  steps_daily ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
-    } catch (e) {
-      _log('steps_daily error: $e');
-    }
-  }
-
-  /// 10분 루프 1회 — 분리된 격자 타입 전부 + 당일 누적 걸음.
+  /// 10분 루프 1회 — 분리된 격자 타입 전부.
   void _intervalSweep() {
     _queryInterval('heart_rate_interval');
     _queryInterval('steps_interval');
     _queryInterval('distance_interval');
     _queryInterval('calories_interval');
-    _queryStepsDaily();
   }
 
   Future<void> _queryHourly() async {
@@ -166,7 +155,6 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         'nutrition' => await _plugin.queryNutrition(since, to),
         'water_intake' => await _plugin.queryWaterIntake(since, to),
         'height' => await _plugin.queryHeight(since, to), // iOS=HealthKit 샘플 / Android=UserProfile (cm)
-        'step_segment' => await _plugin.queryStepSegments(since, to), // iOS 전용 걸음 활동 구간 (Android 미지원 → 빈 리스트)
         _ => <HealthRecord>[],
       };
       _logRecords('$name → ${records.length} record(s)', records, (r) => '  $name ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
@@ -328,7 +316,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
           ConstrainedBox(
             constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.42),
             child: SingleChildScrollView(
-              child: _ButtonGrid(loopRunning: _loopRunning, onConnect: _connect, onRequestPermission: _requestPermission, onQueryInterval: _queryInterval, onQueryStepsDaily: _queryStepsDaily, onQueryHourly: _queryHourly, onQueryDaily: _queryDaily, onQueryWeight: _queryWeight, onToggleLoop: _toggleLoop, onQueryByName: _queryListByName, onQueryChanges: _queryChanges),
+              child: _ButtonGrid(loopRunning: _loopRunning, onConnect: _connect, onRequestPermission: _requestPermission, onQueryInterval: _queryInterval, onQueryHourly: _queryHourly, onQueryDaily: _queryDaily, onQueryWeight: _queryWeight, onToggleLoop: _toggleLoop, onQueryByName: _queryListByName, onQueryChanges: _queryChanges),
             ),
           ),
           const Divider(height: 1),
@@ -376,11 +364,10 @@ class _StatusBar extends StatelessWidget {
 class _ButtonGrid extends StatelessWidget {
   final bool loopRunning;
   final VoidCallback onConnect, onRequestPermission;
-  final VoidCallback onQueryStepsDaily;
   final VoidCallback onQueryHourly, onQueryDaily, onQueryWeight, onToggleLoop;
   final Future<void> Function(String) onQueryInterval, onQueryByName, onQueryChanges;
 
-  const _ButtonGrid({required this.loopRunning, required this.onConnect, required this.onRequestPermission, required this.onQueryInterval, required this.onQueryStepsDaily, required this.onQueryHourly, required this.onQueryDaily, required this.onQueryWeight, required this.onToggleLoop, required this.onQueryByName, required this.onQueryChanges});
+  const _ButtonGrid({required this.loopRunning, required this.onConnect, required this.onRequestPermission, required this.onQueryInterval, required this.onQueryHourly, required this.onQueryDaily, required this.onQueryWeight, required this.onToggleLoop, required this.onQueryByName, required this.onQueryChanges});
 
   @override
   Widget build(BuildContext context) {
@@ -392,12 +379,12 @@ class _ButtonGrid extends StatelessWidget {
         children: [
           _section('연결 · 권한', [FilledButton(onPressed: onConnect, child: const Text('Connect')), FilledButton(onPressed: onRequestPermission, child: const Text('Request Permission')), FilledButton.tonal(onPressed: onToggleLoop, child: Text(loopRunning ? 'Stop 10-min Loop' : 'Start 10-min Loop'))]),
           // metric 해체 → 10분 격자 버킷 타입 각각 버튼화 (최근 1시간 조회).
-          _section('10분 격자 지표', [OutlinedButton(onPressed: () => onQueryInterval('heart_rate_interval'), child: const Text('심박수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('steps_interval'), child: const Text('걸음 수 (Android·최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('distance_interval'), child: const Text('이동 거리 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('calories_interval'), child: const Text('소비 칼로리 (최근 1h)'))]),
-          _section('요약', [OutlinedButton(onPressed: onQueryStepsDaily, child: const Text('당일 누적 걸음 (오늘)')), OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary (현재 1h)')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary (어제)')), OutlinedButton(onPressed: () => onQueryByName('step_segment'), child: const Text('걸음 활동 구간 (iOS·오늘)'))]),
+          _section('10분 격자 지표', [OutlinedButton(onPressed: () => onQueryInterval('heart_rate_interval'), child: const Text('심박수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('steps_interval'), child: const Text('걸음 수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('distance_interval'), child: const Text('이동 거리 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('calories_interval'), child: const Text('소비 칼로리 (최근 1h)'))]),
+          _section('요약', [OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary (현재 1h)')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary (어제)'))]),
           // 수면·운동·영양은 변경 피드(신규+수정+삭제)로 조회 — 한 버튼으로 추가/편집/삭제 모두 확인.
-          _section('수면·운동·영양 (변경 피드)', [OutlinedButton(onPressed: () => onQueryChanges('sleep'), child: const Text('수면 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('exercise'), child: const Text('운동 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('nutrition'), child: const Text('영양 (변경 24h)'))]),
+          _section('수면·운동·영양', [OutlinedButton(onPressed: () => onQueryChanges('sleep'), child: const Text('수면 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('exercise'), child: const Text('운동 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('nutrition'), child: const Text('영양 (변경 24h)'))]),
           _section('신체·체성분', [OutlinedButton(onPressed: onQueryWeight, child: const Text('체중·체성분 (최근 30일)')), OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키 (최근 30일)'))]),
-          _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryByName('blood_glucose'), child: const Text('혈당 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('blood_pressure'), child: const Text('혈압 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('water_intake'), child: const Text('물 섭취 (오늘)')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS·오늘)'))]),
+          _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryChanges('blood_glucose'), child: const Text('혈당 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('blood_pressure'), child: const Text('혈압 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('water_intake'), child: const Text('물 섭취 (변경 24h)')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS·오늘)'))]),
           const SizedBox(height: 8),
         ],
       ),

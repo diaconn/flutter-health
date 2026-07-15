@@ -74,19 +74,6 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     result.success(client.requestPermission(act))
                 }
             }
-            "queryStepsDaily" -> {
-                val isoDate = call.argument<String>("date")
-                val date = isoDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                if (date == null) {
-                    result.error("INVALID_ARGS", "date must be ISO local date (yyyy-MM-dd)", null)
-                    return
-                }
-                scope.launch {
-                    runCatching { client.queryStepsDaily(date).map { it.toMap() } }
-                        .onSuccess { result.success(it) }
-                        .onFailure { result.error("QUERY_ERROR", it.message, null) }
-                }
-            }
             "queryEndedSleepSessions" -> {
                 val since = call.argument<Number>("since")?.toLong()
                 val to = call.argument<Number>("to")?.toLong()
