@@ -83,16 +83,27 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환. metric 에서 분리된 독립 타입.
-    func querySteps(since: Date, to: Date) async -> [HealthRecord] {
-        let buckets = await queryGridBuckets(.stepCount, options: .cumulativeSum, since: since, to: to)
-        let tz = currentTzOffset()
-        let createdAt = toMs(Date())
-        return buckets.compactMap { b in
-            guard let c = b.stats.sumQuantity()?.doubleValue(for: .count()), c > 0 else { return nil }
-            let value = StepsIntervalValue(count: Int(c))
-            return HealthRecord(dataType: Self.dataTypeStepsInterval, timestamp: toMs(b.start), endTimestamp: toMs(b.end), tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
+    /// iOS 걸음은 step_segment(per-sample, queryStepSegments)로 수집(7/15 결정) → steps_interval 미수집.
+    /// STEPS_INTERVAL(10분 격자)은 Android(SamsungHealthClient) 전용. querySteps 는 공용 API 라 시그니처만 유지하고 빈 리스트 반환.
+    func querySteps(since: Date, to: Date) async -> [HealthRecord] { [] }
+
+    /// 걸음 활동 구간 — stepCount 샘플을 각각 시작/종료/걸음수로 반환(iOS 전용).
+    /// iPhone·워치가 동시 기록하면 시간 겹치는 샘플이 함께 옴 → sourceType 으로 구분.
+    func queryStepSegments(since: Date, to: Date) async -> [HealthRecord] {
+        await queryQuantitySamples(.stepCount, unit: .count(), dataType: Self.dataTypeStepSegment, since: since, to: to) { v, sample in
+            let count = Int(v)
+            return count > 0 ? StepSegmentValue(count: count, sourceType: Self.stepSourceType(sample)) : nil
         }
+    }
+
+    /// 기록 기기 종류를 phone|watch|tablet|other 로 정규화(기기명 대신).
+    /// HKDevice 이름 또는 모델 식별자(예: "iPhone14,5", "Watch6,18")로 판별.
+    private static func stepSourceType(_ sample: HKSample) -> String {
+        let raw = (sample.device?.name ?? sample.sourceRevision.productType ?? "").lowercased()
+        if raw.contains("watch") { return "watch" }
+        if raw.contains("iphone") { return "phone" }
+        if raw.contains("ipad") { return "tablet" }
+        return "other"
     }
 
     /// 이동 거리를 **벽시계 10분 격자 버킷**별 합(distance_interval, m)으로 반환. metric 에서 분리된 독립 타입.
@@ -963,9 +974,10 @@ final class HealthKitClient: @unchecked Sendable {
         let max: Int?
     }
 
-    /// 걸음 10분 격자 버킷 값. metric 에서 분리된 독립 타입(steps_interval).
-    private struct StepsIntervalValue: Codable {
+    /// 걸음 활동 구간 값(step_segment, iOS 전용). 개별 stepCount 샘플의 걸음수 + 기록 기기 종류.
+    fileprivate struct StepSegmentValue: Codable {
         let count: Int
+        let sourceType: String       // 기록 기기 종류: "phone"|"watch"|"tablet"|"other" (사용자 지정 기기명 대신 정규화)
     }
 
     /// 이동 거리 10분 격자 버킷 값(m). metric 에서 분리된 독립 타입(distance_interval).
@@ -1080,7 +1092,6 @@ final class HealthKitClient: @unchecked Sendable {
 
     static let bucketMinutes = 10
     static let dataTypeHeartRateInterval = "heart_rate_interval"
-    static let dataTypeStepsInterval = "steps_interval"
     static let dataTypeDistanceInterval = "distance_interval"
     static let dataTypeCaloriesInterval = "calories_interval"
     static let dataTypeStepsDaily = "steps_daily"
@@ -1096,6 +1107,7 @@ final class HealthKitClient: @unchecked Sendable {
     static let dataTypeInsulinDelivery = "insulin_delivery"
     static let dataTypeWaterIntake = "water_intake"
     static let dataTypeHeight = "height"
+    static let dataTypeStepSegment = "step_segment"
     static let source = "apple_health"
 }
 

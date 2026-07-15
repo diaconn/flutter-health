@@ -11,6 +11,7 @@ import 'height_value.dart';
 import 'hourly_summary_value.dart';
 import 'nutrition_value.dart';
 import 'sleep_value.dart';
+import 'step_segment_value.dart';
 import 'steps_daily_value.dart';
 import 'steps_interval_value.dart';
 import 'water_intake_value.dart';
@@ -37,6 +38,8 @@ class HealthRecord {
   static const String typeWaterIntake = 'water_intake';
   // insulin_delivery 는 iOS 전용(Android Samsung SDK 미제공). 플랫폼은 타입 이름이 아니라 source(apple_health/samsung_health)로 구분한다.
   static const String typeHeight = 'height';
+  // 걸음 활동 구간 — iOS 전용(HKQuantitySample per-sample). Android 걸음은 STEPS_INTERVAL(집계)로 수집
+  static const String typeStepSegment = 'step_segment';
 
   final String dataType;
   final int timestamp;
@@ -71,6 +74,7 @@ class HealthRecord {
   NutritionValue? get asNutrition => dataType == typeNutrition ? NutritionValue.fromJson(_decoded()) : null;
   WaterIntakeValue? get asWaterIntake => dataType == typeWaterIntake ? WaterIntakeValue.fromJson(_decoded()) : null;
   HeightValue? get asHeight => dataType == typeHeight ? HeightValue.fromJson(_decoded()) : null;
+  StepSegmentValue? get asStepSegment => dataType == typeStepSegment ? StepSegmentValue.fromJson(_decoded()) : null;
 
   @override
   String toString() => 'HealthRecord(dataType: $dataType, timestamp: $timestamp, source: $source)';

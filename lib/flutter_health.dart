@@ -16,6 +16,7 @@ export 'src/models/insulin_delivery_value.dart';
 export 'src/models/nutrition_value.dart';
 export 'src/models/water_intake_value.dart';
 export 'src/models/height_value.dart';
+export 'src/models/step_segment_value.dart';
 
 import 'flutter_health_platform_interface.dart';
 import 'src/models/health_record.dart';
@@ -99,6 +100,11 @@ class FlutterHealth {
   /// [since]~[to] 구간 내 모든 수분 섭취 (water_intake) 기록.
   Future<List<HealthRecord>> queryWaterIntake(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryWaterIntake(since, to);
+
+  /// [since]~[to] 걸음 활동 구간(step_segment). **iOS 전용** — 개별 stepCount 샘플(value.count,
+  /// value.sourceType=phone/watch/tablet/other). Android 는 STEPS_INTERVAL 로 수집 → 빈 리스트.
+  Future<List<HealthRecord>> queryStepSegments(DateTime since, DateTime to) =>
+      FlutterHealthPlatform.instance.queryStepSegments(since, to);
 
   /// 키(신장, dataType="height") 목록을 반환. value.value 는 **cm**(양 플랫폼 통일).
   /// - iOS: HealthKit `height` 샘플들을 [since]~[to] 구간에서 반환(최신순).
