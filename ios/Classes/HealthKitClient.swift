@@ -83,7 +83,7 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// iOS 걸음은 step_segment(per-sample, queryStepSegments)로 수집(7/15 결정) → steps_interval 미수집.
+    /// iOS 걸음은 step_segment(per-sample, queryStepSegments)로 수집 → steps_interval 미수집.
     /// STEPS_INTERVAL(10분 격자)은 Android(SamsungHealthClient) 전용. querySteps 는 공용 API 라 시그니처만 유지하고 빈 리스트 반환.
     func querySteps(since: Date, to: Date) async -> [HealthRecord] { [] }
 
@@ -704,7 +704,7 @@ final class HealthKitClient: @unchecked Sendable {
         HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)!,
         HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic)!,
         // ⚠️ 혈압 correlation 타입(.bloodPressure)은 requestAuthorization read set 에 넣으면 런타임 크래시한다 —
-        //    권한 요청은 위 컴포넌트(systolic/diastolic)로만, correlation 은 조회(HKCorrelationQuery)용. (2026-06-22 실측 확인)
+        //    권한 요청은 위 컴포넌트(systolic/diastolic)로만, correlation 은 조회(HKCorrelationQuery)용.
         HKObjectType.quantityType(forIdentifier: .insulinDelivery)!,   // 인슐린 투여(iOS) — read set 누락으로 미수집되던 것 추가
         HKObjectType.quantityType(forIdentifier: .dietaryWater)!,
         // 영양(nutrition) 세부 영양소

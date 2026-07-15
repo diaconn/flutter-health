@@ -563,7 +563,7 @@ class SamsungHealthClient(private val context: Context) {
                     endTimestamp = now,
                     tzOffset = tz,
                     source = SOURCE,
-                    // Samsung UserProfile.HEIGHT 는 cm (실기기 검증 2026-06-04, iOS·스키마와 통일).
+                    // Samsung UserProfile.HEIGHT 는 cm (iOS·스키마와 통일).
                     valueJson = json.encodeToString(HeightValue(height = height.toDouble())),
                     createdAt = now,
                     // UserProfile 은 UserDataPoint(레코드 uid 없는 프로필 값) → uid 미설정(null).
@@ -995,7 +995,7 @@ class SamsungHealthClient(private val context: Context) {
         const val SOURCE = "samsung_health"
 
         // 혈당 단위 변환: Samsung SDK GLUCOSE_LEVEL raw = mmol/L → mg/dL (iOS HealthKit·스키마와 통일).
-        // 1 mmol/L = 18.0182 mg/dL. 실기기 기준치 대조 검증 완료(2026-06-04).
+        // 1 mmol/L = 18.0182 mg/dL.
         private const val MMOL_L_TO_MG_DL = 18.0182
 
         private const val TAG = "FlutterHealth"
