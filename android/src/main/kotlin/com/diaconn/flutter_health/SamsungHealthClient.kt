@@ -554,13 +554,16 @@ class SamsungHealthClient(private val context: Context) {
             val request = DataTypes.USER_PROFILE.readDataRequestBuilder.build()
             val tz = currentTzOffset()
             val now = System.currentTimeMillis()
+            // 프로필 값은 측정 시각·uid 가 없어 당일 자정(로컬)을 시각으로 사용 → 하루 한 행.
+            // 서버 시각매칭 upsert: 같은 날 같은 값 skip / 값 변경 시 그 행 UPDATE / 날 바뀌면 새 행.
+            val midnight = LocalDate.now(ZoneId.systemDefault()).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
             s.readData(request).dataList.mapNotNull { point ->
                 val height = point.getValueOrDefault(DataType.UserProfileDataType.HEIGHT, 0f)
                 if (height <= 0f) return@mapNotNull null
                 HealthRecord(
                     dataType = DATA_TYPE_HEIGHT,
-                    timestamp = now,            // 프로필 값은 측정 시각이 없어 조회 시각 사용
-                    endTimestamp = now,
+                    timestamp = midnight,
+                    endTimestamp = midnight,
                     tzOffset = tz,
                     source = SOURCE,
                     // Samsung UserProfile.HEIGHT 는 cm (iOS·스키마와 통일).
