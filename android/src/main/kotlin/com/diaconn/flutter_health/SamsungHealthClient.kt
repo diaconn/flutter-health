@@ -241,7 +241,7 @@ class SamsungHealthClient(private val context: Context) {
         HealthRecord(
             dataType = DATA_TYPE_HOURLY_SUMMARY,
             timestamp = hourStartMs,
-            endTimestamp = hourEndMs,
+            endTimestamp = hourEndMs - 1,
             tzOffset = currentTzOffset(),
             source = SOURCE,
             valueJson = json.encodeToString(HourlySummaryValue(
