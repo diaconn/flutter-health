@@ -241,7 +241,8 @@ final class HealthKitClient: @unchecked Sendable {
         let dist = await distanceTotal
         let totalKcal: Double? = (activeKcal == nil && basalKcal == nil) ? nil : (activeKcal ?? 0) + (basalKcal ?? 0)
 
-        if hr.avg == nil && st == nil && totalKcal == nil {
+        // 요약이 담는 지표가 전부 nil 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
+        if hr.avg == nil && st == nil && totalKcal == nil && exTimeMin == nil && dist == nil {
             return nil
         }
 
@@ -304,7 +305,9 @@ final class HealthKitClient: @unchecked Sendable {
         }
         let exerciseTotalCalories: Double? = exerciseCaloriesList.isEmpty ? nil : exerciseCaloriesList.reduce(0.0, +)
 
-        if hr.avg == nil && st == nil && sleepDuration == nil && exerciseCount == nil {
+        // 요약이 담는 지표가 전부 nil 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
+        if hr.avg == nil && st == nil && totalKcal == nil && exTimeMin == nil && dist == nil
+            && sleepDuration == nil && exerciseCount == nil {
             return nil
         }
 

@@ -229,6 +229,7 @@ class SamsungHealthClient(private val context: Context) {
         val activeTimeTotal = atD.await()
         val distanceTotal = diD.await()
 
+        // 요약이 담는 지표가 전부 null 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
         if (hrStats.avg == null && stepsTotal == null && caloriesTotal == null &&
             caloriesActiveTotal == null && activeTimeTotal == null && distanceTotal == null) {
             return@coroutineScope null
@@ -298,7 +299,10 @@ class SamsungHealthClient(private val context: Context) {
             runCatching { json.decodeFromString<ExerciseValue>(it.valueJson).calories }.getOrNull()
         }.reduceOrNull { acc, d -> acc + d }
 
-        if (hrStats.avg == null && stepsTotal == null && sleepDuration == null && exerciseCount == null) {
+        // 요약이 담는 지표가 전부 null 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
+        if (hrStats.avg == null && stepsTotal == null && caloriesTotal == null &&
+            caloriesActiveTotal == null && activeTimeTotal == null && distanceTotal == null &&
+            sleepDuration == null && exerciseCount == null) {
             return@coroutineScope null
         }
 
