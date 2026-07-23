@@ -108,27 +108,17 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total=활동+기초대사·active=활동, kcal)으로 반환.
-    /// active·basal 격자를 각각 구해 버킷 시작 기준으로 병합한다.
+    /// 활동 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, active=활동 소비, kcal)으로 반환.
+    /// 기초대사 포함 총소비는 하루가 지나야 확정되므로 daily_summary 에만 둔다.
     func queryCalories(since: Date, to: Date) async -> [HealthRecord] {
-        async let activeB = queryGridBuckets(.activeEnergyBurned, options: .cumulativeSum, since: since, to: to)
-        async let basalB = queryGridBuckets(.basalEnergyBurned, options: .cumulativeSum, since: since, to: to)
-        // 버킷 시작(ms) → kcal 로 인덱싱. total = active + basal, 한쪽만 있는 칸도 살리려 키 합집합으로 순회.
-        func kcalByStart(_ buckets: [(start: Date, end: Date, stats: HKStatistics)]) -> [Int64: Double] {
-            Dictionary(uniqueKeysWithValues: buckets.compactMap { b in
-                (b.stats.sumQuantity()?.doubleValue(for: .kilocalorie())).map { (toMs(b.start), $0) }
-            })
-        }
-        let active = kcalByStart(await activeB)
-        let basal = kcalByStart(await basalB)
+        let activeB = await queryGridBuckets(.activeEnergyBurned, options: .cumulativeSum, since: since, to: to)
         let bucketMs = Int64(Self.bucketMinutes * 60_000)
         let tz = currentTzOffset()
         let createdAt = toMs(Date())
-        return Set(active.keys).union(basal.keys).sorted().compactMap { startMs in
-            let total = (active[startMs] ?? 0) + (basal[startMs] ?? 0)
-            guard total > 0 else { return nil }
-            let value = CaloriesIntervalValue(total: total, active: active[startMs])
-            return HealthRecord(dataType: Self.dataTypeCaloriesInterval, timestamp: startMs, endTimestamp: startMs + bucketMs, tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
+        return activeB.compactMap { b in
+            guard let active = b.stats.sumQuantity()?.doubleValue(for: .kilocalorie()), active > 0 else { return nil }
+            let value = CaloriesIntervalValue(active: active)
+            return HealthRecord(dataType: Self.dataTypeCaloriesInterval, timestamp: toMs(b.start), endTimestamp: toMs(b.start) + bucketMs, tzOffset: tz, source: Self.source, valueJson: encodeToJson(value), createdAt: createdAt)
         }
     }
 
@@ -229,20 +219,17 @@ final class HealthKitClient: @unchecked Sendable {
         let hourInterval = DateComponents(hour: 1)
         async let stepsTotal = querySumBucketed(.stepCount, unit: .count(), bucketStart: hourStart, interval: hourInterval)
         async let activeKcalQ = querySumBucketed(.activeEnergyBurned, unit: .kilocalorie(), bucketStart: hourStart, interval: hourInterval)
-        async let basalKcalQ = querySumBucketed(.basalEnergyBurned, unit: .kilocalorie(), bucketStart: hourStart, interval: hourInterval)
         async let activeTimeMinQ = querySumBucketed(.appleExerciseTime, unit: .minute(), bucketStart: hourStart, interval: hourInterval)
         async let distanceTotal = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: hourStart, interval: hourInterval)
 
         let hr = await hrStats
         let st = await stepsTotal
         let activeKcal = await activeKcalQ
-        let basalKcal = await basalKcalQ
         let exTimeMin = await activeTimeMinQ
         let dist = await distanceTotal
-        let totalKcal: Double? = (activeKcal == nil && basalKcal == nil) ? nil : (activeKcal ?? 0) + (basalKcal ?? 0)
 
         // 요약이 담는 지표가 전부 nil 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
-        if hr.avg == nil && st == nil && totalKcal == nil && exTimeMin == nil && dist == nil {
+        if hr.avg == nil && st == nil && activeKcal == nil && exTimeMin == nil && dist == nil {
             return nil
         }
 
@@ -254,7 +241,6 @@ final class HealthKitClient: @unchecked Sendable {
             heartRateMin: hr.min,
             heartRateMax: hr.max,
             stepsTotal: st.map { Int($0) },
-            caloriesTotal: totalKcal,
             caloriesActiveTotal: activeKcal,
             activeTimeTotal: exTimeMin.map { Int($0) },
             distanceTotal: dist
@@ -962,10 +948,9 @@ final class HealthKitClient: @unchecked Sendable {
         let distance: Double
     }
 
-    /// 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동.
+    /// 소비 칼로리 10분 격자 버킷 값(kcal). active=활동 소비(기초대사 제외).
     private struct CaloriesIntervalValue: Codable {
-        let total: Double
-        let active: Double?
+        let active: Double
     }
 
     fileprivate struct SleepValue: Codable {
@@ -989,7 +974,6 @@ final class HealthKitClient: @unchecked Sendable {
         let heartRateMin: Int?
         let heartRateMax: Int?
         let stepsTotal: Int?
-        let caloriesTotal: Double?          // total = basal + active
         let caloriesActiveTotal: Double?    // active 만
         let activeTimeTotal: Int?            // appleExerciseTime 분 합
         let distanceTotal: Double?

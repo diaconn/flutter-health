@@ -154,22 +154,18 @@ class SamsungHealthClient(private val context: Context) {
     }
 
     /**
-     * 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, total=활동+기초대사·active=활동, kcal)으로 반환한다.
-     * total/active 격자를 각각 받아 버킷 시작 기준으로 병합한다.
+     * 활동 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, active=활동 소비, kcal)으로 반환한다.
+     * 기초대사 포함 총소비는 하루가 지나야 확정되므로 daily_summary 에만 둔다.
      */
-    suspend fun queryCalories(since: Long, to: Long): List<HealthRecord> = coroutineScope {
-        val s = store ?: return@coroutineScope emptyList()
-        val totalD = async { aggregateGrid(s, DataType.ActivitySummaryType.TOTAL_CALORIES_BURNED, since, to, "칼로리") }
-        val activeD = async { aggregateGrid(s, DataType.ActivitySummaryType.TOTAL_ACTIVE_CALORIES_BURNED, since, to, "활동 칼로리") }
-        val activeByStart = activeD.await().associate { it.startTime.toEpochMilli() to it.getValueOrDefault(0f).toDouble() }
+    suspend fun queryCalories(since: Long, to: Long): List<HealthRecord> {
+        val s = store ?: return emptyList()
         val tz = currentTzOffset()
         val now = System.currentTimeMillis()
-        totalD.await().mapNotNull { d ->
-            val total = d.getValueOrDefault(0f).toDouble().takeIf { it > 0.0 } ?: return@mapNotNull null
+        return aggregateGrid(s, DataType.ActivitySummaryType.TOTAL_ACTIVE_CALORIES_BURNED, since, to, "활동 칼로리").mapNotNull { d ->
+            val active = d.getValueOrDefault(0f).toDouble().takeIf { it > 0.0 } ?: return@mapNotNull null
             val startMs = d.startTime.toEpochMilli()
-            val active = activeByStart[startMs]?.takeIf { it > 0.0 }
             HealthRecord(DATA_TYPE_CALORIES_INTERVAL, startMs, startMs + BUCKET_MS, tz, SOURCE,
-                json.encodeToString(CaloriesIntervalValue(total = total, active = active)), now)
+                json.encodeToString(CaloriesIntervalValue(active = active)), now)
         }.sortedByDescending { it.timestamp }
     }
 
@@ -217,20 +213,18 @@ class SamsungHealthClient(private val context: Context) {
 
         val hrD = async { readHeartRateStats(s, instantFilter) }
         val stD = async { aggregateSteps(s, localFilter) }
-        val caD = async { aggregateCalories(s, localFilter) }
         val caaD = async { aggregateActiveCalories(s, localFilter) }
         val atD = async { aggregateActiveTime(s, localFilter) }
         val diD = async { aggregateDistance(s, localFilter) }
 
         val hrStats = hrD.await()
         val stepsTotal = stD.await()
-        val caloriesTotal = caD.await()
         val caloriesActiveTotal = caaD.await()
         val activeTimeTotal = atD.await()
         val distanceTotal = diD.await()
 
         // 요약이 담는 지표가 전부 null 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
-        if (hrStats.avg == null && stepsTotal == null && caloriesTotal == null &&
+        if (hrStats.avg == null && stepsTotal == null &&
             caloriesActiveTotal == null && activeTimeTotal == null && distanceTotal == null) {
             return@coroutineScope null
         }
@@ -251,7 +245,6 @@ class SamsungHealthClient(private val context: Context) {
                 heartRateMin = hrStats.min,
                 heartRateMax = hrStats.max,
                 stepsTotal = stepsTotal,
-                caloriesTotal = caloriesTotal,
                 caloriesActiveTotal = caloriesActiveTotal,
                 activeTimeTotal = activeTimeTotal,
                 distanceTotal = distanceTotal
@@ -862,9 +855,9 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class DistanceIntervalValue(val distance: Double)
 
-    /** 소비 칼로리 10분 격자 버킷 값(kcal). total=활동+기초대사, active=활동. */
+    /** 소비 칼로리 10분 격자 버킷 값(kcal). active=활동 소비(기초대사 제외). */
     @Serializable
-    private data class CaloriesIntervalValue(val total: Double, val active: Double? = null)
+    private data class CaloriesIntervalValue(val active: Double)
 
 
     @Serializable
@@ -890,7 +883,6 @@ class SamsungHealthClient(private val context: Context) {
         val heartRateMin: Int?,
         val heartRateMax: Int?,
         val stepsTotal: Int?,
-        val caloriesTotal: Double?,
         val caloriesActiveTotal: Double?,
         val activeTimeTotal: Int?,
         val distanceTotal: Double?
