@@ -25,7 +25,6 @@ void main() {
           return null;
         case 'queryHeartRate':
         case 'querySteps':
-        case 'queryEndedSleepSessions':
         case 'queryEndedExerciseSessions':
           return [];
         default:
@@ -57,9 +56,4 @@ void main() {
     expect(result, isEmpty);
   });
 
-  test('queryEndedSleepSessions returns empty list', () async {
-    final result = await platform.queryEndedSleepSessions(
-        DateTime.now().subtract(const Duration(days: 1)), DateTime.now());
-    expect(result, isEmpty);
-  });
 }

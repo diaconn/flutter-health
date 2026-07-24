@@ -84,7 +84,9 @@ final class HealthKitClient: @unchecked Sendable {
     }
 
     /// 걸음 수를 **벽시계 10분 격자 버킷**별 합(steps_interval)으로 반환. 양 플랫폼 공통.
-    /// HKStatistics 가 iPhone·워치 multi-source 를 자동 중복 제거하므로 버킷 합 = 정확한 걸음 수.
+    /// HKStatistics 가 iPhone·워치 여러 소스를 자동 중복 제거한다.
+    /// 저장 방식 차이: 삼성은 걸음을 1분 정수로 나눠 둬 10분 칸 합이 건강앱 하루 총합과 딱 맞지만,
+    /// 애플은 구간 덩어리라 칸 경계에서 쪼개져 생긴 소수점을 아래 Int 변환에서 버려 iOS 칸 합이 건강앱보다 몇 걸음 적을 수 있다(항상 같거나 적음, 격자 방식 정상 오차).
     func querySteps(since: Date, to: Date) async -> [HealthRecord] {
         let buckets = await queryGridBuckets(.stepCount, options: .cumulativeSum, since: since, to: to)
         let tz = currentTzOffset()
@@ -122,40 +124,72 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    func queryEndedSleepSessions(since: Date, to: Date) async -> [HealthRecord] {
-        guard HKObjectType.categoryType(forIdentifier: .sleepAnalysis) != nil else { return [] }
-        // 조회 시작을 하루 앞당겨 밤잠 앞부분 조각까지 확보 → 세션 시작시각(session.start)이 매번 같게 잡히게 한다(Android queryEndedSleepSessions 와 동일).
-        // since(36h 씩 밀리는 수집 창)부터 그대로 조회하면 since 가 그 밤 수면 도중에 걸릴 때 세션 시작이 잘려,
-        // 같은 밤이 매번 다른 start_dttm 으로 저장 → UNIQUE(member,'SLEEP',start_dttm) 중복제거를 통과해 한 밤이 여러 행으로 쌓인다.
+    /// 하루 수면시간(분) = asleep*(unspecified·core·deep·rem) 구간의 interval union. awake·inBed 은 제외.
+    /// iOS 는 여러 소스(폰 inBed + 워치 단계 등)가 시간적으로 겹쳐 오므로, 단순 합이 아니라 union 으로 중복을 제거해야 애플 건강 "수면" 수치와 맞는다.
+    private func querySleepMinutesUnion(since: Date, to: Date) async -> Int? {
+        guard HKObjectType.categoryType(forIdentifier: .sleepAnalysis) != nil else { return nil }
+        // 밤잠이 자정을 걸치므로 하루 앞당겨 조회한 뒤, 종료가 요청 창(since~to) 안인 조각만 센다.
         let fetchSince = Calendar.current.date(byAdding: .day, value: -1, to: since) ?? since
         let predicate = HKQuery.predicateForSamples(withStart: fetchSince, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
-            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
+            sortDescriptors: [SortDescriptor(\.startDate, order: .forward)]
         )
-        guard let samples = try? await descriptor.result(for: store) else { return [] }
-        let sessions = groupSleepSessions(samples: samples)
-        let tz = currentTzOffset()
+        guard let samples = try? await descriptor.result(for: store) else { return nil }
         let sinceMs = toMs(since)
         let toMsBound = toMs(to)
-        // 최신순(내림차순) 출력 — 그룹핑은 내부에서 시간순으로 처리되므로 여기서 종료 후 정렬.
-        return sessions.sorted { $0.start > $1.start }.compactMap { session in
-            let startMs = toMs(session.start)
-            let endMs = toMs(session.end)
-            // 1일 패딩으로 끌어온 더 과거 세션은 제외 — 원래 요청 창(since~to)에 "종료된" 세션만 emit(Android .filter{endTimestamp in since..to} 동형).
-            guard endMs >= sinceMs && endMs <= toMsBound else { return nil }
-            let durationMin = Int((endMs - startMs) / 60000)
-            guard durationMin > 0 else { return nil }
-            let value = SleepValue(durationMin: durationMin)
-            return HealthRecord(
-                dataType: Self.dataTypeSleep,
-                timestamp: startMs,
-                endTimestamp: endMs,
-                tzOffset: tz,
-                source: Self.source,
-                valueJson: encodeToJson(value),
-                createdAt: toMs(Date())
-            )
+        // asleep* rawValue: 1(unspecified)·3(core)·4(deep)·5(rem). awake(2)·inBed(0) 제외. 종료가 요청 창 안인 것만.
+        let asleepRaw: Set<Int> = [1, 3, 4, 5]
+        let intervals = samples
+            .filter { asleepRaw.contains($0.value) && toMs($0.endDate) >= sinceMs && toMs($0.endDate) <= toMsBound }
+            .map { (start: $0.startDate, end: $0.endDate) }
+            .sorted { $0.start < $1.start }
+        guard !intervals.isEmpty else { return nil }
+        // interval union — 겹치거나 이어지는 구간을 합쳐 길이만 더한다(겹친 시간 이중계산 방지).
+        var totalSec: TimeInterval = 0
+        var curStart = intervals[0].start
+        var curEnd = intervals[0].end
+        for iv in intervals.dropFirst() {
+            if iv.start > curEnd {
+                totalSec += curEnd.timeIntervalSince(curStart)
+                curStart = iv.start
+                curEnd = iv.end
+            } else {
+                curEnd = max(curEnd, iv.end)
+            }
+        }
+        totalSec += curEnd.timeIntervalSince(curStart)
+        let mins = Int(totalSec / 60)
+        return mins > 0 ? mins : nil
+    }
+
+    /// iOS 수면(raw) — sleepAnalysis 샘플 1건 = 단계 조각 1행(각 uuid). 병합 없이 그대로 전달하고, 세션 합성·정규화는 서버가 한다.
+    /// 단계값은 애플 원시 분류(HKCategoryValueSleepAnalysis) 그대로: in_bed/asleep_unspecified/awake/asleep_core/asleep_deep/asleep_rem.
+    private func buildSleepStageRecord(_ sample: HKSample, tz: String) -> HealthRecord? {
+        guard let s = sample as? HKCategorySample,
+              let stage = Self.sleepStageString(s.value) else { return nil }
+        return HealthRecord(
+            dataType: Self.dataTypeSleep,
+            timestamp: toMs(s.startDate),
+            endTimestamp: toMs(s.endDate),
+            tzOffset: tz,
+            source: Self.source,
+            valueJson: encodeToJson(SleepStageValue(stage: stage, stageValue: s.value)),
+            createdAt: toMs(Date()),
+            uid: s.uuid.uuidString
+        )
+    }
+
+    /// HKCategoryValueSleepAnalysis rawValue → 애플 원시 단계 문자열. iOS 16+ 심볼 참조를 피하려 rawValue 로 직접 매핑.
+    private static func sleepStageString(_ raw: Int) -> String? {
+        switch raw {
+        case 0: return "in_bed"
+        case 1: return "asleep_unspecified"
+        case 2: return "awake"
+        case 3: return "asleep_core"
+        case 4: return "asleep_deep"
+        case 5: return "asleep_rem"
+        default: return nil
         }
     }
 
@@ -279,9 +313,8 @@ final class HealthKitClient: @unchecked Sendable {
         // total = active + basal (둘 중 하나만 있으면 그것만, 둘 다 nil 이면 nil)
         let totalKcal: Double? = (activeKcal == nil && basalKcal == nil) ? nil : (activeKcal ?? 0) + (basalKcal ?? 0)
 
-        let sleepSessions = await queryEndedSleepSessions(since: dayStart, to: dayEnd)
-        let mainSleep = sleepSessions.max { ($0.endTimestamp - $0.timestamp) < ($1.endTimestamp - $1.timestamp) }
-        let sleepDuration = mainSleep.map { Int(($0.endTimestamp - $0.timestamp) / 60000) }
+        // 수면시간 = asleep* interval union(§1-5, awake·inBed 제외) — 병합 세션 span 이 아니라 애플 건강 "수면"과 같은 정의.
+        let sleepDuration = await querySleepMinutesUnion(since: dayStart, to: dayEnd)
 
         let exerciseSessions = await queryEndedExerciseSessions(since: dayStart, to: dayEnd)
         let exerciseCount = exerciseSessions.isEmpty ? nil : exerciseSessions.count
@@ -581,7 +614,7 @@ final class HealthKitClient: @unchecked Sendable {
         }
         // 2-a) uid 타입 재조회 — anchored 로 감지한 added 구간을 정식 조회로 다시 읽어 완전 레코드로 대체.
         switch dataType {
-        case Self.dataTypeSleep, "nutrition",
+        case "nutrition",
              Self.dataTypeWeight, Self.dataTypeBmi, Self.dataTypeBodyFatPercentage,
              Self.dataTypeBloodGlucose, Self.dataTypeBloodPressure, Self.dataTypeWaterIntake,
              Self.dataTypeInsulinDelivery, Self.dataTypeHeight:
@@ -589,7 +622,6 @@ final class HealthKitClient: @unchecked Sendable {
             guard let spanStart = added.map({ $0.startDate }).min() else { return ([], deletedUids, token) }
             let full: [HealthRecord]
             switch dataType {
-            case Self.dataTypeSleep:             full = await queryEndedSleepSessions(since: spanStart, to: Date())
             case Self.dataTypeWeight:            full = await queryWeight(since: spanStart, to: Date())
             case Self.dataTypeBmi:               full = await queryBmi(since: spanStart, to: Date())
             case Self.dataTypeBodyFatPercentage: full = await queryBodyFatPercent(since: spanStart, to: Date())
@@ -608,11 +640,15 @@ final class HealthKitClient: @unchecked Sendable {
         default:
             break
         }
-        // 2-b) 운동(exercise) — HKWorkout 은 그 자체로 완전 레코드라 재조회 없이 빌더로 변환(재조회 분기 밖은 exercise 뿐).
+        // 2-b) 자체 완전 레코드 타입 — 재조회 없이 raw 샘플을 그대로 변환.
+        //   · 수면(sleep): iOS 는 sleepAnalysis 샘플 하나가 곧 단계 조각(각 uuid) → 병합 없이 raw 그대로(세션 합성·정규화는 서버).
+        //   · 운동(exercise): HKWorkout 그 자체로 완전.
         let tz = currentTzOffset()
         var records: [HealthRecord] = []
         for sample in added {
-            if let workout = sample as? HKWorkout, let r = await buildExerciseRecord(workout, tz: tz) {
+            if dataType == Self.dataTypeSleep {
+                if let r = buildSleepStageRecord(sample, tz: tz) { records.append(r) }
+            } else if let workout = sample as? HKWorkout, let r = await buildExerciseRecord(workout, tz: tz) {
                 records.append(r)
             }
         }
@@ -835,36 +871,6 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    private func groupSleepSessions(samples: [HKCategorySample]) -> [SleepSession] {
-        let sortedSamples = samples.sorted { $0.startDate < $1.startDate }
-        var sessions: [SleepSession] = []
-        var current: SleepSession? = nil
-
-        for sample in sortedSamples {
-            let isAwake = HKCategoryValueSleepAnalysis(rawValue: sample.value) == .awake
-            guard !isAwake || current != nil else { continue }
-
-            if current == nil {
-                current = SleepSession(start: sample.startDate, end: sample.endDate)
-            }
-            guard var session = current else { continue }
-
-            let gapMin = sample.startDate.timeIntervalSince(session.end) / 60
-            if gapMin > 30 {
-                sessions.append(session)
-                current = SleepSession(start: sample.startDate, end: sample.endDate)
-                continue
-            }
-
-            session.end = max(session.end, sample.endDate)
-            current = session
-        }
-        if let session = current {
-            sessions.append(session)
-        }
-        return sessions
-    }
-
     // deprecated·.other·미래 case만 default → "other".
     private func mapWorkoutType(_ type: HKWorkoutActivityType) -> String {
         switch type {
@@ -961,13 +967,6 @@ final class HealthKitClient: @unchecked Sendable {
         return string
     }
 
-    // MARK: - 수면 세션 임시 구조체
-
-    private struct SleepSession {
-        var start: Date
-        var end: Date
-    }
-
     // MARK: - valueJson 직렬화용 Codable 구조체
 
     /// 심박수 10분 격자 버킷 값(bpm).
@@ -992,8 +991,10 @@ final class HealthKitClient: @unchecked Sendable {
         let active: Double
     }
 
-    fileprivate struct SleepValue: Codable {
-        let durationMin: Int?
+    /// iOS 수면 단계 조각 값 — 애플 원시 분류 그대로(정규화는 서버). stage 는 문자열, stageValue 는 HKCategoryValueSleepAnalysis rawValue(0~5).
+    fileprivate struct SleepStageValue: Codable {
+        let stage: String
+        let stageValue: Int
     }
 
     /// iOS·Android 공통 필드만 유지. 시작~종료 시각은 HealthRecord.timestamp/endTimestamp(envelope).

@@ -190,8 +190,14 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         ],
         'token': res.token, // 다음 조회 연속 토큰(iOS anchor / Android pageToken)
       };
-      _log('changes[$dataType]  (upsert ${res.upserted.length} · delete ${res.deletedUids.length})\n'
-          '${const JsonEncoder.withIndent('  ').convert(obj)}');
+      final rawLog = 'changes[$dataType]  (upsert ${res.upserted.length} · delete ${res.deletedUids.length})\n'
+          '${const JsonEncoder.withIndent('  ').convert(obj)}';
+      // 수면은 새 raw 단계 구조라 사람이 읽기 쉬운 요약을 덧붙인다(iOS=단계 조각별 / Android=세션 내 단계 목록).
+      if (dataType == 'sleep' && res.upserted.isNotEmpty) {
+        _log('$rawLog\n— 수면 단계 요약 —\n${res.upserted.map(_sleepLine).join('\n')}');
+      } else {
+        _log(rawLog);
+      }
     } catch (e) {
       _log('changes[$dataType] error: $e');
     }
@@ -263,6 +269,23 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   String _fmtMs(int ms) {
     final d = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
     return '${d.month}/${d.day} ${_fmt(d)}';
+  }
+
+  /// 수면 레코드 사람이 읽기 쉬운 한 줄 — iOS=단계 조각(각 uid) / Android=세션+단계 목록.
+  String _sleepLine(HealthRecord r) {
+    final v = r.asSleep;
+    final durMin = (r.endTimestamp - r.timestamp) ~/ 60000;
+    if (v == null) return '  sleep ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}';
+    if (v.stage != null) {
+      // iOS: sleepAnalysis 조각 1개 = 단계 1개.
+      return '  [iOS 조각] ${v.stage}  ${durMin}m  ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}  uid=${r.uid ?? '-'}';
+    }
+    // Android: 세션 1개 + 단계 목록 중첩.
+    final stageStr = (v.stages ?? []).map((s) {
+      final sMin = ((s.endTime ?? 0) - (s.startTime ?? 0)) ~/ 60000;
+      return '${s.stage}=${sMin}m';
+    }).join(', ');
+    return '  [AND 세션] ${v.durationMin ?? durMin}m  단계[${stageStr.isEmpty ? '없음' : stageStr}]  uid=${r.uid ?? '-'}';
   }
 
   /// 한 쿼리의 레코드를 한 로그 블록으로 출력
@@ -382,7 +405,7 @@ class _ButtonGrid extends StatelessWidget {
           _section('10분 격자 지표', [OutlinedButton(onPressed: () => onQueryInterval('heart_rate_interval'), child: const Text('심박수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('steps_interval'), child: const Text('걸음 수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('distance_interval'), child: const Text('이동 거리 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('calories_interval'), child: const Text('소비 칼로리 (최근 1h)'))]),
           _section('요약', [OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary (현재 1h)')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary (어제)'))]),
           // 수면·운동·영양은 변경 피드(신규+수정+삭제)로 조회 — 한 버튼으로 추가/편집/삭제 모두 확인.
-          _section('수면·운동·영양', [OutlinedButton(onPressed: () => onQueryChanges('sleep'), child: const Text('수면 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('exercise'), child: const Text('운동 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('nutrition'), child: const Text('영양 (변경 24h)'))]),
+          _section('수면·운동·영양', [OutlinedButton(onPressed: () => onQueryChanges('sleep'), child: const Text('수면 단계 raw (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('exercise'), child: const Text('운동 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('nutrition'), child: const Text('영양 (변경 24h)'))]),
           _section('신체·체성분', [OutlinedButton(onPressed: onQueryWeight, child: const Text('체중·체성분 (최근 30일)')), OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키 (최근 30일)'))]),
           _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryChanges('blood_glucose'), child: const Text('혈당 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('blood_pressure'), child: const Text('혈압 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('water_intake'), child: const Text('물 섭취 (변경 24h)')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS·오늘)'))]),
           const SizedBox(height: 8),

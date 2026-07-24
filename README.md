@@ -102,7 +102,6 @@ for (final r in beats) {
 | `queryDistance(since, to)` | 이동 거리 — 벽시계 10분 격자 버킷(distance, m) 합 목록. 완료된 칸만 |
 | `queryCalories(since, to)` | 소비 칼로리 — 벽시계 10분 격자 버킷(total/active, kcal) 합 목록. 완료된 칸만 |
 | `queryStepsDaily(date)` | 당일 누적 걸음 수(count) 1건 — 자정~수집 시점 누적 |
-| `queryEndedSleepSessions(since, to)` | 구간 내 종료된 수면 세션 목록 |
 | `queryEndedExerciseSessions(since, to)` | 구간 내 종료된 운동 세션 목록 |
 | `queryHourlySummary(hourStart, hourEnd)` | 1시간 집계 (HR·걸음·칼로리·거리) |
 | `queryDailySummary(date)` | 1일 집계 (HR·걸음·칼로리·거리·수면·운동) |
@@ -213,11 +212,13 @@ Future<void> _checkSummaries() async {
 }
 ```
 
-### 수면·운동 세션 조회
+### 수면·운동 조회
 
 ```dart
-// 매 사이클마다 최근 5분 범위로 조회
-final sessions = await health.queryEndedSleepSessions(from, to);
+// 수면은 변경 피드로 조회 (iOS=단계 조각/각 uuid, Android=세션+단계) — 추가·수정·삭제 델타.
+final sleep = await health.queryChanges('sleep', since: from, to: to);
+// 운동 세션 (HKWorkout 그 자체로 완전)
+final workouts = await health.queryEndedExerciseSessions(from, to);
 ```
 
 ---

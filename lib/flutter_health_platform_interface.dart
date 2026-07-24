@@ -40,8 +40,6 @@ abstract class FlutterHealthPlatform extends PlatformInterface {
   /// 소비 칼로리를 벽시계 10분 격자 버킷(total/active, kcal)별 합으로 반환(calories_interval). 완료된 칸만.
   Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) => throw UnimplementedError();
 
-  Future<List<HealthRecord>> queryEndedSleepSessions(DateTime since, DateTime to) => throw UnimplementedError();
-
   Future<List<HealthRecord>> queryEndedExerciseSessions(DateTime since, DateTime to) => throw UnimplementedError();
 
   Future<HealthRecord?> queryHourlySummary(DateTime hourStart, DateTime hourEnd) => throw UnimplementedError();

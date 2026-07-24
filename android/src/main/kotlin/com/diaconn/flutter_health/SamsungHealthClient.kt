@@ -170,20 +170,41 @@ class SamsungHealthClient(private val context: Context) {
     }
 
     /** [since]~[to] 구간에 종료된 수면 세션 목록을 반환한다. */
-    suspend fun queryEndedSleepSessions(since: Long, to: Long): List<HealthRecord> {
-        val s = store ?: return emptyList()
+    /** 하루 수면시간(분) = asleep 단계(light·deep·rem) 구간의 interval union. awake·undefined 은 제외.
+     *  단순 세션 span 이 아니라 단계 union 으로 계산해 iOS 와 정의를 맞춘다(§1-5). */
+    suspend fun querySleepAsleepMinutes(since: Long, to: Long): Int? {
+        val s = store ?: return null
         return runCatching {
-            // 수면은 보통 자정을 걸쳐서 일어나므로(예: 23:00 ~ 07:00) 시작 시각을 하루 앞당겨 넉넉히 가져온 뒤,
-            // 종료 시각이 원래 요청 범위(since~to) 안인 것만 남긴다.
+            // 밤잠이 자정을 걸치므로 하루 앞당겨 조회한 뒤, 종료가 요청 창(since~to) 안인 세션의 asleep 단계만 센다.
             val sinceLocal = since.toLocalDateTime().minusDays(1)
             val toLocal = to.toLocalDateTime()
             val filter = LocalTimeFilter.of(sinceLocal, toLocal)
             val request = DataTypes.SLEEP.readDataRequestBuilder.setLocalTimeFilter(filter).build()
-            s.readData(request).dataList
-                .mapNotNull { buildSleepRecord(it) }
-                .filter { it.endTimestamp in since..to }
-                .sortedByDescending { it.timestamp }
-        }.onFailure { Log.e(TAG, "수면 세션 조회 실패", it) }.getOrDefault(emptyList())
+            val asleep = setOf("light", "deep", "rem")
+            val intervals = s.readData(request).dataList
+                .flatMap { p -> runCatching { p.getValue(DataType.SleepType.SESSIONS) }.getOrNull().orEmpty() }
+                .filter { session -> session.endTime.toEpochMilli() in since..to }
+                .flatMap { session -> session.stages }
+                .filter { it.stage.name.lowercase() in asleep }
+                .map { it.startTime.toEpochMilli() to it.endTime.toEpochMilli() }
+                .sortedBy { it.first }
+            if (intervals.isEmpty()) return@runCatching null
+            // interval union — 겹치거나 이어지는 구간을 합쳐 길이만 더한다(겹친 시간 이중계산 방지).
+            var totalMs = 0L
+            var curStart = intervals[0].first
+            var curEnd = intervals[0].second
+            for (iv in intervals.drop(1)) {
+                if (iv.first > curEnd) {
+                    totalMs += curEnd - curStart
+                    curStart = iv.first
+                    curEnd = iv.second
+                } else {
+                    curEnd = maxOf(curEnd, iv.second)
+                }
+            }
+            totalMs += curEnd - curStart
+            (totalMs / 60000L).toInt().takeIf { it > 0 }
+        }.onFailure { Log.e(TAG, "수면 union 계산 실패", it) }.getOrNull()
     }
 
     /** [since]~[to] 구간에 종료된 운동 세션 목록을 반환한다. */
@@ -271,7 +292,7 @@ class SamsungHealthClient(private val context: Context) {
         val caaD = async { aggregateActiveCalories(s, localFilter) }
         val atD = async { aggregateActiveTime(s, localFilter) }
         val diD = async { aggregateDistance(s, localFilter) }
-        val sleepD = async { queryEndedSleepSessions(dayStartMs, dayEndMs) }
+        val sleepD = async { querySleepAsleepMinutes(dayStartMs, dayEndMs) }
         val exerciseD = async { queryEndedExerciseSessions(dayStartMs, dayEndMs) }
 
         val hrStats = hrD.await()
@@ -280,11 +301,9 @@ class SamsungHealthClient(private val context: Context) {
         val caloriesActiveTotal = caaD.await()
         val activeTimeTotal = atD.await()
         val distanceTotal = diD.await()
-        val sleepSessions = sleepD.await()
+        // 수면시간 = asleep 단계 union(§1-5, awake 제외) — 세션 span 이 아니라 iOS 와 동일 정의.
+        val sleepDuration = sleepD.await()
         val exerciseSessions = exerciseD.await()
-
-        val mainSleep = sleepSessions.maxByOrNull { it.endTimestamp - it.timestamp }
-        val sleepDuration = mainSleep?.let { (it.endTimestamp - it.timestamp) / 60000 }?.toInt()
 
         val exerciseCount = exerciseSessions.size.takeIf { it > 0 }
         val exerciseTotalMin = exerciseSessions.sumOf { (it.endTimestamp - it.timestamp) / 60000 }.toInt().takeIf { it > 0 }
@@ -742,6 +761,20 @@ class SamsungHealthClient(private val context: Context) {
         val durationMs = runCatching {
             point.getValue(DataType.SleepType.DURATION)?.toMillis()
         }.getOrNull() ?: (endMs - startMs)
+        // 세션 내 단계(stages) 파싱 — 단계는 양 플랫폼 공통 제공(iOS 도 단계별로 옴). 단계명은 삼성 raw(light/deep/rem/awake)
+        // 그대로 전달하고 정규화(light↔코어 등)는 서버가 한다. sleep_score 는 iOS 미제공이라 수집하지 않는다.
+        val stages = runCatching {
+            point.getValue(DataType.SleepType.SESSIONS)
+                ?.flatMap { session -> session.stages }
+                ?.map { st ->
+                    SleepStageEntry(
+                        stage = st.stage.name.lowercase(),
+                        startTime = st.startTime.toEpochMilli(),
+                        endTime = st.endTime.toEpochMilli(),
+                    )
+                }
+                ?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
 
         return HealthRecord(
             dataType = DATA_TYPE_SLEEP,
@@ -750,7 +783,8 @@ class SamsungHealthClient(private val context: Context) {
             tzOffset = currentTzOffset(),
             source = SOURCE,
             valueJson = json.encodeToString(SleepValue(
-                durationMin = (durationMs / 60000L).toInt().takeIf { it > 0 }
+                durationMin = (durationMs / 60000L).toInt().takeIf { it > 0 },
+                stages = stages,
             )),
             createdAt = System.currentTimeMillis(),
             uid = point.uid,
@@ -861,8 +895,16 @@ class SamsungHealthClient(private val context: Context) {
 
 
     @Serializable
+    private data class SleepStageEntry(
+        val stage: String,       // 삼성 raw 단계: light/deep/rem/awake/undefined (정규화는 서버)
+        val startTime: Long,
+        val endTime: Long,
+    )
+
+    @Serializable
     private data class SleepValue(
-        val durationMin: Int?
+        val durationMin: Int?,
+        val stages: List<SleepStageEntry>? = null,
     )
 
     @Serializable

@@ -54,10 +54,6 @@ class FlutterHealth {
   Future<List<HealthRecord>> queryCalories(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryCalories(since, to);
 
-  /// [since]~[to] 구간에 종료된 수면 세션 목록을 반환.
-  Future<List<HealthRecord>> queryEndedSleepSessions(DateTime since, DateTime to) =>
-      FlutterHealthPlatform.instance.queryEndedSleepSessions(since, to);
-
   /// [since]~[to] 구간에 종료된 운동 세션 목록을 반환.
   Future<List<HealthRecord>> queryEndedExerciseSessions(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryEndedExerciseSessions(since, to);

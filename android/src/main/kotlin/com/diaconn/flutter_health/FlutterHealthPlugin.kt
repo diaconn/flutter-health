@@ -74,19 +74,6 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     result.success(client.requestPermission(act))
                 }
             }
-            "queryEndedSleepSessions" -> {
-                val since = call.argument<Number>("since")?.toLong()
-                val to = call.argument<Number>("to")?.toLong()
-                if (since == null || to == null) {
-                    result.error("INVALID_ARGS", "since and to are required", null)
-                    return
-                }
-                scope.launch {
-                    runCatching { client.queryEndedSleepSessions(since, to).map { it.toMap() } }
-                        .onSuccess { result.success(it) }
-                        .onFailure { result.error("QUERY_ERROR", it.message, null) }
-                }
-            }
             "queryEndedExerciseSessions" -> {
                 val since = call.argument<Number>("since")?.toLong()
                 val to = call.argument<Number>("to")?.toLong()

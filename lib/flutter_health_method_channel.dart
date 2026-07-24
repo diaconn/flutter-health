@@ -45,10 +45,6 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
 
 
   @override
-  Future<List<HealthRecord>> queryEndedSleepSessions(DateTime since, DateTime to) =>
-      _queryList('queryEndedSleepSessions', since, to);
-
-  @override
   Future<List<HealthRecord>> queryEndedExerciseSessions(DateTime since, DateTime to) =>
       _queryList('queryEndedExerciseSessions', since, to);
 

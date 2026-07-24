@@ -41,26 +41,6 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-        case "queryEndedSleepSessions":
-            guard let args = call.arguments as? [String: Any],
-                  let sinceMs = args["since"] as? Int,
-                  let toMs    = args["to"]    as? Int else {
-                result(FlutterError(code: "INVALID_ARGS", message: "since/to required", details: nil))
-                return
-            }
-            let since = Date(timeIntervalSince1970: Double(sinceMs) / 1000.0)
-            let to    = Date(timeIntervalSince1970: Double(toMs)    / 1000.0)
-            Task {
-                do {
-                    let records = try await client.queryEndedSleepSessions(since: since, to: to)
-                    DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
-                } catch {
-                    DispatchQueue.main.async {
-                        result(FlutterError(code: "HK_ERROR", message: error.localizedDescription, details: nil))
-                    }
-                }
-            }
-
         case "queryEndedExerciseSessions":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
