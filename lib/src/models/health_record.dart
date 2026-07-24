@@ -32,6 +32,15 @@ class HealthRecord {
   static const String typeBloodPressure = 'blood_pressure';
   // 영양 — Android 는 nutrition 한 행에 번들, iOS 는 영양소별 독립 타입(nutrition_<영양소>, 서버가 prefix 로 처리).
   static const String typeNutrition = 'nutrition';
+
+  /// iOS 영양 성분별 변경 피드 타입(19종) — iOS HealthKitClient.nutritionSpecs 와 1:1. 성분별로 anchor(token)를 갖는다.
+  static const List<String> nutritionTypesIos = [
+    'nutrition_energy', 'nutrition_carbohydrate', 'nutrition_protein', 'nutrition_fat', //
+    'nutrition_fat_saturated', 'nutrition_fat_poly', 'nutrition_fat_mono', 'nutrition_sugar', //
+    'nutrition_fiber', 'nutrition_cholesterol', 'nutrition_sodium', 'nutrition_potassium', //
+    'nutrition_calcium', 'nutrition_iron', 'nutrition_magnesium', 'nutrition_caffeine', //
+    'nutrition_vitamin_a', 'nutrition_vitamin_c', 'nutrition_vitamin_d',
+  ];
   static const String typeWaterIntake = 'water_intake';
   // insulin_delivery 는 iOS 전용(Android Samsung SDK 미제공). 플랫폼은 타입 이름이 아니라 source(apple_health/samsung_health)로 구분한다.
   static const String typeHeight = 'height';

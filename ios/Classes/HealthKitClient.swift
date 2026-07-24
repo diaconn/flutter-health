@@ -456,14 +456,13 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    func queryNutrition(since: Date, to: Date) async -> [HealthRecord] {
-        // 원천 1:1 — HealthKit 의 영양소별 개별 샘플을 각자 독립 타입(nutrition_*)으로 per-sample emit (집계/번들 제거).
-        // 건강앱 식이 에너지(섭취 에너지)와 각 영양소는 HealthKit 에서 이미 별개 수량 타입이라, 그대로 1:1 적재한다.
+    /// 영양 성분 스펙(19종) — queryNutrition·queryNutrient·sampleType 공유. dataType 은 앱 HealthRecord.nutritionTypesIos 와 1:1.
+    static let nutritionSpecs: [(id: HKQuantityTypeIdentifier, dataType: String, unit: HKUnit, unitLabel: String)] = {
         let kcal = HKUnit.kilocalorie()
         let g = HKUnit.gram()
         let mg = HKUnit.gramUnit(with: .milli)
         let mcg = HKUnit.gramUnit(with: .micro)
-        let specs: [(HKQuantityTypeIdentifier, String, HKUnit, String)] = [
+        return [
             (.dietaryEnergyConsumed,      "nutrition_energy",        kcal, "kcal"), // 섭취 에너지(Apple "Dietary Energy"). 소모(CALORIES_INTERVAL)와 구분
             (.dietaryCarbohydrates,       "nutrition_carbohydrate",  g,    "g"),
             (.dietaryProtein,             "nutrition_protein",       g,    "g"),
@@ -484,18 +483,25 @@ final class HealthKitClient: @unchecked Sendable {
             (.dietaryVitaminC,            "nutrition_vitamin_c",     mg,   "mg"),
             (.dietaryVitaminD,            "nutrition_vitamin_d",     mcg,  "mcg"),
         ]
-        // 영양소별 쿼리를 동시 실행(직렬 대기 방지) — @unchecked Sendable 라 task group 안전. 순서 무관(레코드가 dataType/timestamp 보유).
+    }()
+
+    /// 전 성분(nutrition_* 19종)을 성분별로 조회 — 동시 실행(직렬 대기 방지, @unchecked Sendable 라 task group 안전).
+    func queryNutrition(since: Date, to: Date) async -> [HealthRecord] {
         return await withTaskGroup(of: [HealthRecord].self) { group in
-            for (id, dataType, unit, unitLabel) in specs {
-                group.addTask {
-                    await self.queryQuantitySamples(id, unit: unit, dataType: dataType, since: since, to: to) { v, _ in
-                        v > 0 ? QuantitySampleValue(value: v, unit: unitLabel) : nil
-                    }
-                }
+            for spec in Self.nutritionSpecs {
+                group.addTask { await self.queryNutrient(spec.dataType, since: since, to: to) }
             }
             var out: [HealthRecord] = []
             for await chunk in group { out += chunk }
             return out
+        }
+    }
+
+    /// 단일 성분 조회 — 성분별 변경 피드(queryChanges 2-a)가 added 구간을 완전 레코드로 대체할 때 사용.
+    func queryNutrient(_ dataType: String, since: Date, to: Date) async -> [HealthRecord] {
+        guard let spec = Self.nutritionSpecs.first(where: { $0.dataType == dataType }) else { return [] }
+        return await queryQuantitySamples(spec.id, unit: spec.unit, dataType: spec.dataType, since: since, to: to) { v, _ in
+            v > 0 ? QuantitySampleValue(value: v, unit: spec.unitLabel) : nil
         }
     }
 
@@ -544,7 +550,7 @@ final class HealthKitClient: @unchecked Sendable {
     /// - anchorToken(base64) 이 있으면 그 시점 이후 **델타만**(추가/삭제), 없으면 since~to 범위 전량이 기준선.
     /// - HealthKit 의 "수정"은 구 uuid 삭제 + 신 uuid 추가로 오므로, 수정 시 신규는 upserted, 구본은 deletedUids 에 나온다.
     /// - deletedObjects 는 anchor 확립 이후 삭제분만 잡히므로 반드시 (기준선 호출 → 편집/삭제 → 재호출) 순서로 검증.
-    /// - anchored 델타는 raw/부분 샘플로만 와서 저장 스키마가 불완전하다 → uid 타입은 추가분 구간을 정식 조회로 재조회해 완전 레코드로 대체한다(수면=병합 세션 / 영양=영양소 per-sample / 체중=weight+bmi+체지방률 / 혈당·혈압·수분=측정 전체). 운동(HKWorkout)만 그 자체로 완전해 재조회 없이 변환.
+    /// - anchored 델타는 raw/부분 샘플로만 와서 저장 스키마가 불완전하다 → uid 타입은 추가분 구간을 정식 조회로 재조회해 완전 레코드로 대체한다(수면=병합 세션 / 영양=성분별 피드·해당 성분만 재조회 / 체중=weight+bmi+체지방률 / 혈당·혈압·수분=측정 전체). 운동(HKWorkout)만 그 자체로 완전해 재조회 없이 변환.
     func queryChanges(dataType: String, since: Date, to: Date, anchorToken: String?) async -> (upserted: [HealthRecord], deletedUids: [String], token: String?) {
         guard let sampleType = Self.sampleType(forDataType: dataType) else { return ([], [], nil) }
         let predicate = HKQuery.predicateForSamples(withStart: since, end: to, options: [])
@@ -561,7 +567,7 @@ final class HealthKitClient: @unchecked Sendable {
         }
         // 2-a) uid 타입 재조회 — anchored 로 감지한 added 구간을 정식 조회로 다시 읽어 완전 레코드로 대체.
         switch dataType {
-        case Self.dataTypeSleep, "nutrition", "nutrition_energy",
+        case Self.dataTypeSleep, "nutrition",
              Self.dataTypeWeight, Self.dataTypeBloodGlucose, Self.dataTypeBloodPressure, Self.dataTypeWaterIntake:
             // added 비면 삭제뿐 → deletedUids·token 만 반환.
             guard let spanStart = added.map({ $0.startDate }).min() else { return ([], deletedUids, token) }
@@ -572,9 +578,13 @@ final class HealthKitClient: @unchecked Sendable {
             case Self.dataTypeBloodGlucose:  full = await queryBloodGlucose(since: spanStart, to: Date())
             case Self.dataTypeBloodPressure: full = await queryBloodPressure(since: spanStart, to: Date())
             case Self.dataTypeWaterIntake:   full = await queryWaterIntake(since: spanStart, to: Date())
-            default:                         full = await queryNutrition(since: spanStart, to: Date()) // nutrition, nutrition_energy
+            default:                         full = await queryNutrition(since: spanStart, to: Date()) // "nutrition" 단일 피드 구 호환(전 성분 재조회)
             }
             return (full, deletedUids, token)
+        case let t where t.hasPrefix("nutrition_"):
+            // 성분별 피드 — added 구간을 해당 성분만 재조회해 완전 레코드로 대체(deleted 는 그 성분 샘플 uid 그대로).
+            guard let spanStart = added.map({ $0.startDate }).min() else { return ([], deletedUids, token) }
+            return (await queryNutrient(t, since: spanStart, to: Date()), deletedUids, token)
         default:
             break
         }
@@ -599,8 +609,10 @@ final class HealthKitClient: @unchecked Sendable {
         case dataTypeWaterIntake:   return HKObjectType.quantityType(forIdentifier: .dietaryWater)
         // correlation 은 read set/조회에서 크래시 이슈 → systolic 컴포넌트로 변경 감지(완전값은 재조회 queryBloodPressure 가 생성).
         case dataTypeBloodPressure: return HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)
-        // 영양은 섭취 에너지(대표 1종)로 처리 — 실제로는 영양소별 개별 샘플이라 각자 uid 를 가진다.
-        case "nutrition", "nutrition_energy": return HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)
+        // 영양(iOS=성분 단위 per-sample): 성분별 개별 피드 — anchor/token 도 성분별로 관리된다. "nutrition" 은 단일 피드 구 호환(대표=섭취 에너지).
+        case "nutrition": return HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)
+        case let t where t.hasPrefix("nutrition_"):
+            return nutritionSpecs.first(where: { $0.dataType == t }).flatMap { HKObjectType.quantityType(forIdentifier: $0.id) }
         default: return nil
         }
     }
