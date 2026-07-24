@@ -325,17 +325,30 @@ final class HealthKitClient: @unchecked Sendable {
         )
     }
 
-    /// 체중·체성분 — HealthKit 원천과 1:1. 체중은 weight 타입, BMI·체지방률은
-    /// 각자 독립 타입으로 per-sample 적재. 3종 동시 조회(직렬 대기 방지).
+    /// 체중, BMI, 체지방률을 각자 독립 타입으로 per-sample 조회(HealthKit 원천 1:1) — 3종 동시(직렬 대기 방지).
     func queryWeights(since: Date, to: Date) async -> [HealthRecord] {
-        async let weight  = queryQuantitySamples(.bodyMass, unit: weightUnit, dataType: Self.dataTypeWeight, since: since, to: to) { kg, _ in kg > 0 ? WeightValue(weight: kg) : nil }
-        async let bmi     = queryQuantitySamples(.bodyMassIndex, unit: .count(), dataType: Self.dataTypeBmi, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "kg/m²") : nil }
-        // bodyFat 은 .percent()=분수(0~1)라 100배해 %.
-        async let bodyFat = queryQuantitySamples(.bodyFatPercentage, unit: .percent(), dataType: Self.dataTypeBodyFatPercentage, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v * 100, unit: "%") : nil }
+        async let weight         = queryWeight(since: since, to: to)
+        async let bmi            = queryBmi(since: since, to: to)
+        async let bodyFatPercent = queryBodyFatPercent(since: since, to: to)
         var out = await weight
         out += await bmi
-        out += await bodyFat
+        out += await bodyFatPercent
         return out
+    }
+
+    /// 체중(bodyMass, kg) 단일 조회 — iOS 성분별 체성분 피드(queryChanges 2-a)용.
+    func queryWeight(since: Date, to: Date) async -> [HealthRecord] {
+        return await queryQuantitySamples(.bodyMass, unit: weightUnit, dataType: Self.dataTypeWeight, since: since, to: to) { kg, _ in kg > 0 ? WeightValue(weight: kg) : nil }
+    }
+
+    /// BMI(bodyMassIndex) 단일 조회 — iOS 성분별 체성분 피드(queryChanges 2-a)용.
+    func queryBmi(since: Date, to: Date) async -> [HealthRecord] {
+        return await queryQuantitySamples(.bodyMassIndex, unit: .count(), dataType: Self.dataTypeBmi, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v, unit: "kg/m²") : nil }
+    }
+
+    /// 체지방률(bodyFatPercentage) 단일 조회 — .percent()=분수(0~1)라 100배해 %. iOS 성분별 체성분 피드용.
+    func queryBodyFatPercent(since: Date, to: Date) async -> [HealthRecord] {
+        return await queryQuantitySamples(.bodyFatPercentage, unit: .percent(), dataType: Self.dataTypeBodyFatPercentage, since: since, to: to) { v, _ in v > 0 ? QuantitySampleValue(value: v * 100, unit: "%") : nil }
     }
 
     func queryBloodGlucose(since: Date, to: Date) async -> [HealthRecord] {
@@ -447,7 +460,8 @@ final class HealthKitClient: @unchecked Sendable {
                         source: Self.source,
                         valueJson: self.encodeToJson(value),
                         createdAt: now,
-                        uid: correlation.uuid.uuidString
+                        // 변경 피드가 systolic 컴포넌트를 앵커로 삭제 감지 → deletedObjects=systolic uuid. 저장 uid도 systolic 컴포넌트로 맞춰 삭제 매칭.
+                        uid: sys.uuid.uuidString
                     )
                 }
                 continuation.resume(returning: records)
@@ -568,17 +582,23 @@ final class HealthKitClient: @unchecked Sendable {
         // 2-a) uid 타입 재조회 — anchored 로 감지한 added 구간을 정식 조회로 다시 읽어 완전 레코드로 대체.
         switch dataType {
         case Self.dataTypeSleep, "nutrition",
-             Self.dataTypeWeight, Self.dataTypeBloodGlucose, Self.dataTypeBloodPressure, Self.dataTypeWaterIntake:
+             Self.dataTypeWeight, Self.dataTypeBmi, Self.dataTypeBodyFatPercentage,
+             Self.dataTypeBloodGlucose, Self.dataTypeBloodPressure, Self.dataTypeWaterIntake,
+             Self.dataTypeInsulinDelivery, Self.dataTypeHeight:
             // added 비면 삭제뿐 → deletedUids·token 만 반환.
             guard let spanStart = added.map({ $0.startDate }).min() else { return ([], deletedUids, token) }
             let full: [HealthRecord]
             switch dataType {
-            case Self.dataTypeSleep:         full = await queryEndedSleepSessions(since: spanStart, to: Date())
-            case Self.dataTypeWeight:        full = await queryWeights(since: spanStart, to: Date())
-            case Self.dataTypeBloodGlucose:  full = await queryBloodGlucose(since: spanStart, to: Date())
-            case Self.dataTypeBloodPressure: full = await queryBloodPressure(since: spanStart, to: Date())
-            case Self.dataTypeWaterIntake:   full = await queryWaterIntake(since: spanStart, to: Date())
-            default:                         full = await queryNutrition(since: spanStart, to: Date()) // "nutrition" 단일 피드 구 호환(전 성분 재조회)
+            case Self.dataTypeSleep:             full = await queryEndedSleepSessions(since: spanStart, to: Date())
+            case Self.dataTypeWeight:            full = await queryWeight(since: spanStart, to: Date())
+            case Self.dataTypeBmi:               full = await queryBmi(since: spanStart, to: Date())
+            case Self.dataTypeBodyFatPercentage: full = await queryBodyFatPercent(since: spanStart, to: Date())
+            case Self.dataTypeBloodGlucose:      full = await queryBloodGlucose(since: spanStart, to: Date())
+            case Self.dataTypeBloodPressure:     full = await queryBloodPressure(since: spanStart, to: Date())
+            case Self.dataTypeWaterIntake:       full = await queryWaterIntake(since: spanStart, to: Date())
+            case Self.dataTypeInsulinDelivery:   full = await queryInsulinDelivery(since: spanStart, to: Date())
+            case Self.dataTypeHeight:            full = await queryHeight(since: spanStart, to: Date())
+            default:                             full = await queryNutrition(since: spanStart, to: Date()) // "nutrition" 단일 피드 구 호환(전 성분 재조회)
             }
             return (full, deletedUids, token)
         case let t where t.hasPrefix("nutrition_"):
@@ -605,11 +625,18 @@ final class HealthKitClient: @unchecked Sendable {
         case dataTypeSleep:         return HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
         case dataTypeExercise:      return HKObjectType.workoutType()
         case dataTypeWeight:        return HKObjectType.quantityType(forIdentifier: .bodyMass)
+        // 체성분 비대칭: Android=BODY_COMPOSITION 번들 / iOS=성분별 독립 타입(weight, bmi, body_fat_percentage 각자 피드·anchor).
+        case dataTypeBmi:                return HKObjectType.quantityType(forIdentifier: .bodyMassIndex)
+        case dataTypeBodyFatPercentage:  return HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)
         case dataTypeBloodGlucose:  return HKObjectType.quantityType(forIdentifier: .bloodGlucose)
         case dataTypeWaterIntake:   return HKObjectType.quantityType(forIdentifier: .dietaryWater)
         // correlation 은 read set/조회에서 크래시 이슈 → systolic 컴포넌트로 변경 감지(완전값은 재조회 queryBloodPressure 가 생성).
         case dataTypeBloodPressure: return HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic)
-        // 영양(iOS=성분 단위 per-sample): 성분별 개별 피드 — anchor/token 도 성분별로 관리된다. "nutrition" 은 단일 피드 구 호환(대표=섭취 에너지).
+        // 인슐린 비대칭: Android=혈당 레코드 필드(insulin_injected) 동봉 / iOS=독립 타입 insulin_delivery 변경 피드(삭제 델타 확보).
+        case dataTypeInsulinDelivery: return HKObjectType.quantityType(forIdentifier: .insulinDelivery)
+        // 키 비대칭: Android=삼성 프로필 설정값(range 조회, 삭제 대상 아님) / iOS=독립 HealthKit 샘플 변경 피드.
+        case dataTypeHeight:          return HKObjectType.quantityType(forIdentifier: .height)
+        // 영양 비대칭: Android=끼니 번들(단일 "nutrition" 피드) / iOS=성분 단위 per-sample(nutrition_* 성분별 피드·anchor).
         case "nutrition": return HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)
         case let t where t.hasPrefix("nutrition_"):
             return nutritionSpecs.first(where: { $0.dataType == t }).flatMap { HKObjectType.quantityType(forIdentifier: $0.id) }

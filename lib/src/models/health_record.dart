@@ -42,7 +42,8 @@ class HealthRecord {
     'nutrition_vitamin_a', 'nutrition_vitamin_c', 'nutrition_vitamin_d',
   ];
   static const String typeWaterIntake = 'water_intake';
-  // insulin_delivery 는 iOS 전용(Android Samsung SDK 미제공). 플랫폼은 타입 이름이 아니라 source(apple_health/samsung_health)로 구분한다.
+  // 인슐린 비대칭: iOS=독립 타입 insulin_delivery(변경 피드) / Android=혈당 레코드 내 필드(blood_glucose.insulin_injected)로 동봉.
+  static const String typeInsulinDelivery = 'insulin_delivery';
   static const String typeHeight = 'height';
 
   final String dataType;
