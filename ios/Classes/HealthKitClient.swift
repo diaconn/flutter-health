@@ -217,6 +217,56 @@ final class HealthKitClient: @unchecked Sendable {
         return records
     }
 
+    /// 요약(daily_summary)용 운동 집계 — 시간이 겹치는 세션을 한 건으로 묶어 센다.
+    /// 워치가 기록한 운동과 같은 시간대에 수동 입력·다른 앱 기록이 겹쳐 들어오면 건강 앱은 하나로 보여주는데,
+    /// workout 은 통계 쿼리가 없어 조회하면 겹친 것이 전부 그대로 온다. 그대로 더하면 개수·시간·칼로리가 부풀려진다.
+    /// 붙어 있기만 한 세션(앞 끝 == 뒤 시작)은 서로 다른 운동이므로 합치지 않는다.
+    /// raw 운동 레코드에는 손대지 않고 요약 숫자에만 적용한다.
+    private func summarizeExercise(_ sessions: [HealthRecord]) -> (count: Int?, totalMin: Int?, totalCalories: Double?) {
+        guard !sessions.isEmpty else { return (nil, nil, nil) }
+        func caloriesOf(_ r: HealthRecord) -> Double? {
+            return (try? jsonDecoder.decode(ExerciseValue.self, from: Data(r.valueJson.utf8)))?.calories
+        }
+        let sorted = sessions.sorted { $0.timestamp < $1.timestamp }
+
+        var count = 0
+        var totalMs: Int64 = 0
+        var kcalSum: Double = 0
+        var anyKcal = false
+
+        var curStart = sorted[0].timestamp
+        var curEnd = sorted[0].endTimestamp
+        var curKcal = caloriesOf(sorted[0])
+
+        func flush() {
+            count += 1
+            totalMs += curEnd - curStart
+            if let k = curKcal {
+                kcalSum += k
+                anyKcal = true
+            }
+        }
+
+        for r in sorted.dropFirst() {
+            let kcal = caloriesOf(r)
+            if r.timestamp >= curEnd {
+                flush()
+                curStart = r.timestamp
+                curEnd = r.endTimestamp
+                curKcal = kcal
+            } else {
+                // 겹치면 같은 운동이 두 번 들어온 것으로 보고 하나로 합친다.
+                // 칼로리는 큰 쪽만 남긴다(수동 입력은 비어 있는 경우가 있다).
+                curEnd = max(curEnd, r.endTimestamp)
+                curKcal = [curKcal, kcal].compactMap { $0 }.max()
+            }
+        }
+        flush()
+
+        let mins = Int(totalMs / 60000)
+        return (count, mins > 0 ? mins : nil, anyKcal ? kcalSum : nil)
+    }
+
     /// HKWorkout → 공통 필드(종목·시간·칼로리·심박·거리)만 추출.
     private func buildExerciseRecord(_ workout: HKWorkout, tz: String) async -> HealthRecord? {
         let startMs = toMs(workout.startDate)
@@ -324,12 +374,8 @@ final class HealthKitClient: @unchecked Sendable {
         let sleep = await querySleepSummaryMinutes(since: dayStart, to: dayEnd)
 
         let exerciseSessions = await queryEndedExerciseSessions(since: dayStart, to: dayEnd)
-        let exerciseCount = exerciseSessions.isEmpty ? nil : exerciseSessions.count
-        let exerciseTotalMin = exerciseSessions.isEmpty ? nil : Int(exerciseSessions.reduce(0) { $0 + ($1.endTimestamp - $1.timestamp) } / 60000)
-        let exerciseCaloriesList = exerciseSessions.compactMap {
-            try? jsonDecoder.decode(ExerciseValue.self, from: Data($0.valueJson.utf8)).calories
-        }
-        let exerciseTotalCalories: Double? = exerciseCaloriesList.isEmpty ? nil : exerciseCaloriesList.reduce(0.0, +)
+        // 겹치는 세션은 한 건으로 묶어 센다(요약 전용, raw 는 그대로).
+        let (exerciseCount, exerciseTotalMin, exerciseTotalCalories) = summarizeExercise(exerciseSessions)
 
         // 요약이 담는 지표가 전부 nil 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
         if hr.avg == nil && st == nil && totalKcal == nil && exTimeMin == nil && dist == nil

@@ -215,6 +215,53 @@ class SamsungHealthClient(private val context: Context) {
         return (totalMs / 60000L).toInt().takeIf { it > 0 }
     }
 
+    /**
+     * 요약(daily_summary)용 운동 집계 — 시간이 겹치는 세션을 한 건으로 묶어 센다.
+     * 같은 운동이 워치·수동 입력·다른 앱으로 겹쳐 들어오면 그대로 더할 때 개수·시간·칼로리가 부풀려진다.
+     * 붙어 있기만 한 세션(앞 끝 == 뒤 시작)은 서로 다른 운동이므로 합치지 않는다.
+     * raw 운동 레코드에는 손대지 않고 요약 숫자에만 적용한다. iOS 와 같은 규칙.
+     */
+    private fun summarizeExercise(sessions: List<HealthRecord>): Triple<Int?, Int?, Double?> {
+        if (sessions.isEmpty()) return Triple(null, null, null)
+        fun caloriesOf(r: HealthRecord): Double? =
+            runCatching { json.decodeFromString<ExerciseValue>(r.valueJson).calories }.getOrNull()
+
+        val sorted = sessions.sortedBy { it.timestamp }
+        var count = 0
+        var totalMs = 0L
+        var kcalSum = 0.0
+        var anyKcal = false
+
+        var curStart = sorted[0].timestamp
+        var curEnd = sorted[0].endTimestamp
+        var curKcal = caloriesOf(sorted[0])
+
+        fun flush() {
+            count++
+            totalMs += curEnd - curStart
+            curKcal?.let { kcalSum += it; anyKcal = true }
+        }
+
+        for (r in sorted.drop(1)) {
+            val kcal = caloriesOf(r)
+            if (r.timestamp >= curEnd) {
+                flush()
+                curStart = r.timestamp
+                curEnd = r.endTimestamp
+                curKcal = kcal
+            } else {
+                // 겹치면 같은 운동이 두 번 들어온 것으로 보고 하나로 합친다.
+                // 칼로리는 큰 쪽만 남긴다(수동 입력은 비어 있는 경우가 있다).
+                curEnd = maxOf(curEnd, r.endTimestamp)
+                curKcal = listOfNotNull(curKcal, kcal).maxOrNull()
+            }
+        }
+        flush()
+
+        val mins = (totalMs / 60000L).toInt()
+        return Triple(count, mins.takeIf { it > 0 }, if (anyKcal) kcalSum else null)
+    }
+
     /** [since]~[to] 구간에 종료된 운동 세션 목록을 반환한다. */
     suspend fun queryEndedExerciseSessions(since: Long, to: Long): List<HealthRecord> {
         val s = store ?: return emptyList()
@@ -313,11 +360,8 @@ class SamsungHealthClient(private val context: Context) {
         val (sleepDuration, inBedDuration) = sleepD.await()
         val exerciseSessions = exerciseD.await()
 
-        val exerciseCount = exerciseSessions.size.takeIf { it > 0 }
-        val exerciseTotalMin = exerciseSessions.sumOf { (it.endTimestamp - it.timestamp) / 60000 }.toInt().takeIf { it > 0 }
-        val exerciseTotalCalories = exerciseSessions.mapNotNull {
-            runCatching { json.decodeFromString<ExerciseValue>(it.valueJson).calories }.getOrNull()
-        }.reduceOrNull { acc, d -> acc + d }
+        // 겹치는 세션은 한 건으로 묶어 센다(요약 전용, raw 는 그대로).
+        val (exerciseCount, exerciseTotalMin, exerciseTotalCalories) = summarizeExercise(exerciseSessions)
 
         // 요약이 담는 지표가 전부 null 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
         if (hrStats.avg == null && stepsTotal == null && caloriesTotal == null &&
