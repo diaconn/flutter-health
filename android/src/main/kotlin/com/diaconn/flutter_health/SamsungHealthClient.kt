@@ -185,10 +185,19 @@ class SamsungHealthClient(private val context: Context) {
                 .flatMap { p -> runCatching { p.getValue(DataType.SleepType.SESSIONS) }.getOrNull().orEmpty() }
                 .filter { session -> session.endTime.toEpochMilli() in since..to }
             val asleep = setOf("light", "deep", "rem")
-            val asleepIntervals = sessions
-                .flatMap { it.stages }
-                .filter { it.stage.name.lowercase() in asleep }
-                .map { it.startTime.toEpochMilli() to it.endTime.toEpochMilli() }
+            // 단계가 없는 세션(수동 입력 등)은 세션 전체를 잠든 시간으로 센다.
+            // 단계를 모를 때 잠든 시간을 0 으로 두면 그 밤의 수면시간이 통째로 비어버린다.
+            // iOS 도 단계 미상 "수면"(asleep_unspecified) 을 그 구간 전체로 세므로 처리가 같아진다.
+            val asleepIntervals = sessions.flatMap { session ->
+                val stages = session.stages.orEmpty()
+                if (stages.isEmpty()) {
+                    listOf(session.startTime.toEpochMilli() to session.endTime.toEpochMilli())
+                } else {
+                    stages
+                        .filter { it.stage.name.lowercase() in asleep }
+                        .map { it.startTime.toEpochMilli() to it.endTime.toEpochMilli() }
+                }
+            }
             val inBedIntervals = sessions
                 .map { it.startTime.toEpochMilli() to it.endTime.toEpochMilli() }
             unionMinutes(asleepIntervals) to unionMinutes(inBedIntervals)
@@ -820,7 +829,7 @@ class SamsungHealthClient(private val context: Context) {
         // 그대로 전달하고 정규화(light↔코어 등)는 서버가 한다. sleep_score 는 iOS 미제공이라 수집하지 않는다.
         val stages = runCatching {
             point.getValue(DataType.SleepType.SESSIONS)
-                ?.flatMap { session -> session.stages }
+                ?.flatMap { session -> session.stages.orEmpty() }
                 ?.map { st ->
                     SleepStageEntry(
                         stage = st.stage.name.lowercase(),
