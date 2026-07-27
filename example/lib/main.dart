@@ -96,7 +96,12 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         'calories_interval' => await _plugin.queryCalories(since, to),
         _ => <HealthRecord>[],
       };
-      _logRecords('$name → ${records.length} bucket(s)', records, (r) => '  $name ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}\n${_prettyRecord(r)}');
+      _logRecords(
+        '$name → ${records.length} bucket(s)',
+        records,
+        (r) =>
+            '  $name ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}\n${_prettyRecord(r)}',
+      );
     } catch (e) {
       _log('$name error: $e');
     }
@@ -116,7 +121,9 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     final hourEnd = hourStart.add(const Duration(hours: 1));
     try {
       final record = await _plugin.queryHourlySummary(hourStart, hourEnd);
-      _log('queryHourlySummary [${_fmt(hourStart)}]\n${record == null ? 'null' : _prettyRecord(record)}');
+      _log(
+        'queryHourlySummary [${_fmt(hourStart)}]\n${record == null ? 'null' : _prettyRecord(record)}',
+      );
     } catch (e) {
       _log('queryHourlySummary error: $e');
     }
@@ -126,52 +133,30 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     final yesterday = DateTime.now().subtract(const Duration(days: 1));
     try {
       final record = await _plugin.queryDailySummary(yesterday);
-      _log('queryDailySummary [${yesterday.toIso8601String().substring(0, 10)}]\n${record == null ? 'null' : _prettyRecord(record)}');
+      _log(
+        'queryDailySummary [${yesterday.toIso8601String().substring(0, 10)}]\n${record == null ? 'null' : _prettyRecord(record)}',
+      );
     } catch (e) {
       _log('queryDailySummary error: $e');
     }
   }
 
-  Future<void> _queryWeight() async {
-    final to = DateTime.now();
-    final since = to.subtract(const Duration(days: 30)); // 체중/체성분은 매일 측정 안 함 — 최근 30일 최신값 유지
-    try {
-      final records = await _plugin.queryWeights(since, to);
-      _logRecords('queryWeights → ${records.length} record(s)', records, (r) => '  weight ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
-    } catch (e) {
-      _log('queryWeights error: $e');
-    }
-  }
-
-  Future<void> _queryListByName(String name) async {
-    final to = DateTime.now();
-    // 키는 매일 측정 안 함 → 최근 30일 최신값 유지. 그 외(혈당·혈압·영양·물·걸음구간 등)는 오늘치만.
-    final since = name == 'height' ? to.subtract(const Duration(days: 30)) : DateTime(to.year, to.month, to.day); // 오늘 0시(로컬)
-    try {
-      final records = switch (name) {
-        'blood_glucose' => await _plugin.queryBloodGlucose(since, to),
-        'blood_pressure' => await _plugin.queryBloodPressure(since, to),
-        'insulin_delivery' => await _plugin.queryInsulinDelivery(since, to), // iOS 전용
-        'nutrition' => await _plugin.queryNutrition(since, to),
-        'water_intake' => await _plugin.queryWaterIntake(since, to),
-        'height' => await _plugin.queryHeight(since, to), // iOS=HealthKit 샘플 / Android=UserProfile (cm)
-        _ => <HealthRecord>[],
-      };
-      _logRecords('$name → ${records.length} record(s)', records, (r) => '  $name ${_fmtMs(r.timestamp)}\n${_prettyRecord(r)}');
-    } catch (e) {
-      _log('$name error: $e');
-    }
-  }
-
   /// 변경 피드 조회 — 한 버튼으로 신규 추가·수정·삭제를 확인. `upserted`(신규·수정) + `deletedUids`(삭제·구버전).
   /// - iOS: 저장된 anchor(token) 기준 델타(최초 호출은 전량이 기준선).
-  /// - Android: 최근 24h 변경시각 창을 매번 재스캔(별도 기준선 불필요).
+  /// - Android: 변경시각 창을 매번 재스캔(별도 기준선 불필요).
+  /// 창 정책: 수면 36h(자정 걸침 종료시각 누락 방지), 나머지 24h — 운영 dashboardSync 기준.
   Future<void> _queryChanges(String dataType) async {
     final to = DateTime.now();
-    final since = to.subtract(const Duration(hours: 24));
+    final since = to.subtract(Duration(hours: dataType == 'sleep' ? 36 : 24));
     try {
-      final res = await _plugin.queryChanges(dataType, since: since, to: to, token: _changeTokens[dataType]);
-      _changeTokens[dataType] = res.token; // 다음 조회용 저장(iOS anchor / Android pageToken)
+      final res = await _plugin.queryChanges(
+        dataType,
+        since: since,
+        to: to,
+        token: _changeTokens[dataType],
+      );
+      _changeTokens[dataType] =
+          res.token; // 다음 조회용 저장(iOS anchor / Android pageToken)
       // { deleted, upserted } 한 덩어리 객체로 출력(수정=구 uid delete + 신 uid upsert 를 한눈에).
       final obj = <String, dynamic>{
         'deleted': res.deletedUids, // 삭제된 원본 uid (최초 동기화 땐 빈 배열)
@@ -190,11 +175,14 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
         ],
         'token': res.token, // 다음 조회 연속 토큰(iOS anchor / Android pageToken)
       };
-      final rawLog = 'changes[$dataType]  (upsert ${res.upserted.length} · delete ${res.deletedUids.length})\n'
+      final rawLog =
+          'changes[$dataType]  (upsert ${res.upserted.length} · delete ${res.deletedUids.length})\n'
           '${const JsonEncoder.withIndent('  ').convert(obj)}';
       // 수면은 새 raw 단계 구조라 사람이 읽기 쉬운 요약을 덧붙인다(iOS=단계 조각별 / Android=세션 내 단계 목록).
       if (dataType == 'sleep' && res.upserted.isNotEmpty) {
-        _log('$rawLog\n— 수면 단계 요약 —\n${res.upserted.map(_sleepLine).join('\n')}');
+        _log(
+          '$rawLog\n— 수면 단계 요약 —\n${res.upserted.map(_sleepLine).join('\n')}',
+        );
       } else {
         _log(rawLog);
       }
@@ -218,11 +206,15 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     _intervalSweep();
 
     final now = DateTime.now();
-    final msInCycle = (now.minute % 10) * 60000 + now.second * 1000 + now.millisecond;
+    final msInCycle =
+        (now.minute % 10) * 60000 + now.second * 1000 + now.millisecond;
     final msToNext = 10 * 60000 - msInCycle;
     _loopTimer = Timer(Duration(milliseconds: msToNext), () {
       _intervalSweep();
-      _loopTimer = Timer.periodic(const Duration(minutes: 10), (_) => _intervalSweep());
+      _loopTimer = Timer.periodic(
+        const Duration(minutes: 10),
+        (_) => _intervalSweep(),
+      );
     });
   }
 
@@ -230,7 +222,9 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     if (_logs.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: _logs.first));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied last log to clipboard')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Copied last log to clipboard')),
+      );
     }
   }
 
@@ -238,7 +232,9 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   Future<void> _copyAllLogs() async {
     if (_logs.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No logs to copy')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No logs to copy')));
       }
       return;
     }
@@ -249,7 +245,9 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
       ..writeln('── flutter_health_example logs ──')
       ..writeln('exported_at: $stamp')
       ..writeln('count: ${ordered.length}')
-      ..writeln('available: $_available · connected: $_connected · permitted: $_permitted')
+      ..writeln(
+        'available: $_available · connected: $_connected · permitted: $_permitted',
+      )
       ..writeln('────────────────────────────────');
     for (var i = 0; i < ordered.length; i++) {
       buf
@@ -260,11 +258,16 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     final text = buf.toString();
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied ${ordered.length} logs (${text.length} chars)')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Copied ${ordered.length} logs (${text.length} chars)'),
+        ),
+      );
     }
   }
 
-  String _fmt(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  String _fmt(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   String _fmtMs(int ms) {
     final d = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
@@ -275,21 +278,28 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   String _sleepLine(HealthRecord r) {
     final v = r.asSleep;
     final durMin = (r.endTimestamp - r.timestamp) ~/ 60000;
-    if (v == null) return '  sleep ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}';
+    if (v == null)
+      return '  sleep ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}';
     if (v.stage != null) {
       // iOS: sleepAnalysis 조각 1개 = 단계 1개.
       return '  [iOS 조각] ${v.stage}  ${durMin}m  ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}  uid=${r.uid ?? '-'}';
     }
     // Android: 세션 1개 + 단계 목록 중첩.
-    final stageStr = (v.stages ?? []).map((s) {
-      final sMin = ((s.endTime ?? 0) - (s.startTime ?? 0)) ~/ 60000;
-      return '${s.stage}=${sMin}m';
-    }).join(', ');
+    final stageStr = (v.stages ?? [])
+        .map((s) {
+          final sMin = ((s.endTime ?? 0) - (s.startTime ?? 0)) ~/ 60000;
+          return '${s.stage}=${sMin}m';
+        })
+        .join(', ');
     return '  [AND 세션] ${v.durationMin ?? durMin}m  단계[${stageStr.isEmpty ? '없음' : stageStr}]  uid=${r.uid ?? '-'}';
   }
 
   /// 한 쿼리의 레코드를 한 로그 블록으로 출력
-  void _logRecords(String header, List<HealthRecord> records, String Function(HealthRecord) line) {
+  void _logRecords(
+    String header,
+    List<HealthRecord> records,
+    String Function(HealthRecord) line,
+  ) {
     final buf = StringBuffer(header);
     for (final r in records) {
       buf.write('\n${line(r)}');
@@ -326,20 +336,47 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
       appBar: AppBar(
         title: const Text('flutter_health demo'),
         actions: [
-          IconButton(icon: const Icon(Icons.copy), tooltip: 'Copy last log', onPressed: _copyLastLog),
-          IconButton(icon: const Icon(Icons.ios_share), tooltip: 'Copy ALL logs', onPressed: _copyAllLogs),
-          IconButton(icon: const Icon(Icons.delete_outline), tooltip: 'Clear logs', onPressed: () => setState(() => _logs.clear())),
+          IconButton(
+            icon: const Icon(Icons.copy),
+            tooltip: 'Copy last log',
+            onPressed: _copyLastLog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.ios_share),
+            tooltip: 'Copy ALL logs',
+            onPressed: _copyAllLogs,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Clear logs',
+            onPressed: () => setState(() => _logs.clear()),
+          ),
         ],
       ),
       body: Column(
         children: [
-          _StatusBar(available: _available, connected: _connected, permitted: _permitted),
+          _StatusBar(
+            available: _available,
+            connected: _connected,
+            permitted: _permitted,
+          ),
           const Divider(height: 1),
           // 버튼 영역: 최대 화면 42% 까지만 차지하고 그 이상은 자체 스크롤.
           ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.42),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.42,
+            ),
             child: SingleChildScrollView(
-              child: _ButtonGrid(loopRunning: _loopRunning, onConnect: _connect, onRequestPermission: _requestPermission, onQueryInterval: _queryInterval, onQueryHourly: _queryHourly, onQueryDaily: _queryDaily, onQueryWeight: _queryWeight, onToggleLoop: _toggleLoop, onQueryByName: _queryListByName, onQueryChanges: _queryChanges),
+              child: _ButtonGrid(
+                loopRunning: _loopRunning,
+                onConnect: _connect,
+                onRequestPermission: _requestPermission,
+                onQueryInterval: _queryInterval,
+                onQueryHourly: _queryHourly,
+                onQueryDaily: _queryDaily,
+                onToggleLoop: _toggleLoop,
+                onQueryChanges: _queryChanges,
+              ),
             ),
           ),
           const Divider(height: 1),
@@ -347,7 +384,10 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
           Expanded(
             child: _logs.isEmpty
                 ? const Center(
-                    child: Text('No logs yet', style: TextStyle(color: Colors.grey)),
+                    child: Text(
+                      'No logs yet',
+                      style: TextStyle(color: Colors.grey),
+                    ),
                   )
                 // SelectionArea + Text — 스크롤 가능한 ListView 안의 SelectableText 는
                 // 스크롤 시 'selection.isValid' assertion 을 던진다. SelectionArea 로 선택/복사를 대신 제공.
@@ -356,7 +396,13 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
                       padding: const EdgeInsets.all(8),
                       itemCount: _logs.length,
                       separatorBuilder: (_, _) => const Divider(height: 8),
-                      itemBuilder: (_, i) => Text(_logs[i], style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+                      itemBuilder: (_, i) => Text(
+                        _logs[i],
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                   ),
           ),
@@ -369,17 +415,31 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
 class _StatusBar extends StatelessWidget {
   final bool available, connected, permitted;
 
-  const _StatusBar({required this.available, required this.connected, required this.permitted});
+  const _StatusBar({
+    required this.available,
+    required this.connected,
+    required this.permitted,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [_chip('Available', available), _chip('Connected', connected), _chip('Permitted', permitted)]),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _chip('Available', available),
+          _chip('Connected', connected),
+          _chip('Permitted', permitted),
+        ],
+      ),
     );
   }
 
-  Widget _chip(String label, bool on) => Chip(label: Text('$label: ${on ? '✓' : '✗'}'), backgroundColor: on ? Colors.green.shade100 : Colors.red.shade100);
+  Widget _chip(String label, bool on) => Chip(
+    label: Text('$label: ${on ? '✓' : '✗'}'),
+    backgroundColor: on ? Colors.green.shade100 : Colors.red.shade100,
+  );
 }
 
 /// 플러그인은 공통(Android + iOS) 기능만 노출한다. (전용 기능은 SDK에서 제거됨)
@@ -387,27 +447,124 @@ class _StatusBar extends StatelessWidget {
 class _ButtonGrid extends StatelessWidget {
   final bool loopRunning;
   final VoidCallback onConnect, onRequestPermission;
-  final VoidCallback onQueryHourly, onQueryDaily, onQueryWeight, onToggleLoop;
-  final Future<void> Function(String) onQueryInterval, onQueryByName, onQueryChanges;
+  final VoidCallback onQueryHourly, onQueryDaily, onToggleLoop;
+  final Future<void> Function(String) onQueryInterval, onQueryChanges;
 
-  const _ButtonGrid({required this.loopRunning, required this.onConnect, required this.onRequestPermission, required this.onQueryInterval, required this.onQueryHourly, required this.onQueryDaily, required this.onQueryWeight, required this.onToggleLoop, required this.onQueryByName, required this.onQueryChanges});
+  const _ButtonGrid({
+    required this.loopRunning,
+    required this.onConnect,
+    required this.onRequestPermission,
+    required this.onQueryInterval,
+    required this.onQueryHourly,
+    required this.onQueryDaily,
+    required this.onToggleLoop,
+    required this.onQueryChanges,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12), // 상단 상태바(horizontal 12)와 좌측 열 정렬
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+      ), // 상단 상태바(horizontal 12)와 좌측 열 정렬
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _section('연결 · 권한', [FilledButton(onPressed: onConnect, child: const Text('Connect')), FilledButton(onPressed: onRequestPermission, child: const Text('Request Permission')), FilledButton.tonal(onPressed: onToggleLoop, child: Text(loopRunning ? 'Stop 10-min Loop' : 'Start 10-min Loop'))]),
+          _section('연결 · 권한', [
+            FilledButton(onPressed: onConnect, child: const Text('Connect')),
+            FilledButton(
+              onPressed: onRequestPermission,
+              child: const Text('Request Permission'),
+            ),
+            FilledButton.tonal(
+              onPressed: onToggleLoop,
+              child: Text(
+                loopRunning ? 'Stop 10-min Loop' : 'Start 10-min Loop',
+              ),
+            ),
+          ]),
           // metric 해체 → 10분 격자 버킷 타입 각각 버튼화 (최근 1시간 조회).
-          _section('10분 격자 지표', [OutlinedButton(onPressed: () => onQueryInterval('heart_rate_interval'), child: const Text('심박수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('steps_interval'), child: const Text('걸음 수 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('distance_interval'), child: const Text('이동 거리 (최근 1h)')), OutlinedButton(onPressed: () => onQueryInterval('calories_interval'), child: const Text('소비 칼로리 (최근 1h)'))]),
-          _section('요약', [OutlinedButton(onPressed: onQueryHourly, child: const Text('Hourly Summary (현재 1h)')), OutlinedButton(onPressed: onQueryDaily, child: const Text('Daily Summary (어제)'))]),
+          _section('10분 격자 지표', [
+            OutlinedButton(
+              onPressed: () => onQueryInterval('heart_rate_interval'),
+              child: const Text('심박수 (최근 1h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryInterval('steps_interval'),
+              child: const Text('걸음 수 (최근 1h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryInterval('distance_interval'),
+              child: const Text('이동 거리 (최근 1h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryInterval('calories_interval'),
+              child: const Text('소비 칼로리 (최근 1h)'),
+            ),
+          ]),
+          _section('요약', [
+            OutlinedButton(
+              onPressed: onQueryHourly,
+              child: const Text('Hourly Summary (현재 1h)'),
+            ),
+            OutlinedButton(
+              onPressed: onQueryDaily,
+              child: const Text('Daily Summary (어제)'),
+            ),
+          ]),
           // 수면·운동·영양은 변경 피드(신규+수정+삭제)로 조회 — 한 버튼으로 추가/편집/삭제 모두 확인.
-          _section('수면·운동·영양', [OutlinedButton(onPressed: () => onQueryChanges('sleep'), child: const Text('수면 단계 raw (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('exercise'), child: const Text('운동 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('nutrition'), child: const Text('영양 (변경 24h)'))]),
-          _section('신체·체성분', [OutlinedButton(onPressed: onQueryWeight, child: const Text('체중·체성분 (최근 30일)')), OutlinedButton(onPressed: () => onQueryByName('height'), child: const Text('키 (최근 30일)'))]),
-          _section('대사·혈액', [OutlinedButton(onPressed: () => onQueryChanges('blood_glucose'), child: const Text('혈당 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('blood_pressure'), child: const Text('혈압 (변경 24h)')), OutlinedButton(onPressed: () => onQueryChanges('water_intake'), child: const Text('물 섭취 (변경 24h)')), OutlinedButton(onPressed: () => onQueryByName('insulin_delivery'), child: const Text('인슐린 투여(값) (iOS·오늘)'))]),
+          _section('수면·운동·영양', [
+            OutlinedButton(
+              onPressed: () => onQueryChanges('sleep'),
+              child: const Text('수면 단계 raw (변경 36h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('exercise'),
+              child: const Text('운동 (변경 24h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('nutrition'),
+              child: const Text('영양 (변경 24h)'),
+            ),
+          ]),
+          // 체성분·키·인슐린도 운영 dashboardSync 와 동일하게 변경 피드(24h)로 조회 — 삭제 델타까지 검증. iOS 기준(Android 는 번들/프로필).
+          _section('신체·체성분', [
+            OutlinedButton(
+              onPressed: () => onQueryChanges('weight'),
+              child: const Text('체중 (변경 24h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('bmi'),
+              child: const Text('체질량지수 (변경 24h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('body_fat_percentage'),
+              child: const Text('체지방률 (변경 24h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('height'),
+              child: const Text('키 (변경 24h·iOS)'),
+            ),
+          ]),
+          _section('대사·혈액', [
+            OutlinedButton(
+              onPressed: () => onQueryChanges('blood_glucose'),
+              child: const Text('혈당 (변경 24h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('blood_pressure'),
+              child: const Text('혈압 (변경 24h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('water_intake'),
+              child: const Text('물 섭취 (변경 24h)'),
+            ),
+            OutlinedButton(
+              onPressed: () => onQueryChanges('insulin_delivery'),
+              child: const Text('인슐린 투여 (변경 24h·iOS)'),
+            ),
+          ]),
           const SizedBox(height: 8),
         ],
       ),
@@ -418,10 +575,17 @@ class _ButtonGrid extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Padding(
-        padding: const EdgeInsets.only(top: 10, bottom: 4), // 좌측 인셋 제거 — 제목·버튼을 ButtonGrid 좌측(12)에 flush
+        padding: const EdgeInsets.only(
+          top: 10,
+          bottom: 4,
+        ), // 좌측 인셋 제거 — 제목·버튼을 ButtonGrid 좌측(12)에 flush
         child: Text(
           title,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey,
+          ),
         ),
       ),
       Wrap(spacing: 8, runSpacing: 8, children: buttons),

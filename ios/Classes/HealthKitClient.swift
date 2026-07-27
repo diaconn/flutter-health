@@ -124,10 +124,14 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// 하루 수면시간(분) = asleep*(unspecified·core·deep·rem) 구간의 interval union. awake·inBed 은 제외.
-    /// iOS 는 여러 소스(폰 inBed + 워치 단계 등)가 시간적으로 겹쳐 오므로, 단순 합이 아니라 union 으로 중복을 제거해야 애플 건강 "수면" 수치와 맞는다.
-    private func querySleepMinutesUnion(since: Date, to: Date) async -> Int? {
-        guard HKObjectType.categoryType(forIdentifier: .sleepAnalysis) != nil else { return nil }
+    /// [일 요약 지표] 하루 "수면시간(분)"과 "취침시간(분)"을 계산한다.
+    /// - 수면시간 = 잠든 단계(unspecified·core·deep·rem) 구간의 합집합(union). 침대(in_bed)·각성(awake) 제외 → 애플 건강 "수면"과 동일.
+    /// - 취침시간 = in_bed 구간의 합집합 → 애플 건강 "취침 시간"과 동일.
+    /// 폰(in_bed)·워치(단계)가 같은 시간을 겹쳐 기록하므로 단순 합산이 아니라 union 으로 겹친 구간을 한 번만 센다.
+    /// ※ 수면은 CategoryType 이라 HKStatisticsQuery 로 집계가 안 됨 → 직접 union 하는 게 유일한 방법.
+    /// ※ 요약용 "숫자" 계산일 뿐, 서버로 보내는 raw 단계 레코드(전 단계)와는 별개다.
+    private func querySleepSummaryMinutes(since: Date, to: Date) async -> (asleep: Int?, inBed: Int?) {
+        guard HKObjectType.categoryType(forIdentifier: .sleepAnalysis) != nil else { return (nil, nil) }
         // 밤잠이 자정을 걸치므로 하루 앞당겨 조회한 뒤, 종료가 요청 창(since~to) 안인 조각만 센다.
         let fetchSince = Calendar.current.date(byAdding: .day, value: -1, to: since) ?? since
         let predicate = HKQuery.predicateForSamples(withStart: fetchSince, end: to, options: .strictEndDate)
@@ -135,36 +139,39 @@ final class HealthKitClient: @unchecked Sendable {
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
             sortDescriptors: [SortDescriptor(\.startDate, order: .forward)]
         )
-        guard let samples = try? await descriptor.result(for: store) else { return nil }
+        guard let samples = try? await descriptor.result(for: store) else { return (nil, nil) }
         let sinceMs = toMs(since)
         let toMsBound = toMs(to)
-        // asleep* rawValue: 1(unspecified)·3(core)·4(deep)·5(rem). awake(2)·inBed(0) 제외. 종료가 요청 창 안인 것만.
-        let asleepRaw: Set<Int> = [1, 3, 4, 5]
-        let intervals = samples
-            .filter { asleepRaw.contains($0.value) && toMs($0.endDate) >= sinceMs && toMs($0.endDate) <= toMsBound }
-            .map { (start: $0.startDate, end: $0.endDate) }
-            .sorted { $0.start < $1.start }
-        guard !intervals.isEmpty else { return nil }
-        // interval union — 겹치거나 이어지는 구간을 합쳐 길이만 더한다(겹친 시간 이중계산 방지).
-        var totalSec: TimeInterval = 0
-        var curStart = intervals[0].start
-        var curEnd = intervals[0].end
-        for iv in intervals.dropFirst() {
-            if iv.start > curEnd {
-                totalSec += curEnd.timeIntervalSince(curStart)
-                curStart = iv.start
-                curEnd = iv.end
-            } else {
-                curEnd = max(curEnd, iv.end)
+        // 주어진 단계값 집합의 구간 union(분). 종료가 요청 창 안인 것만. rawValue: in_bed 0 / unspecified 1 / core 3 / deep 4 / rem 5.
+        func unionMinutes(_ values: Set<Int>) -> Int? {
+            let intervals = samples
+                .filter { values.contains($0.value) && toMs($0.endDate) >= sinceMs && toMs($0.endDate) <= toMsBound }
+                .map { (start: $0.startDate, end: $0.endDate) }
+                .sorted { $0.start < $1.start }
+            guard !intervals.isEmpty else { return nil }
+            // interval union — 겹치거나 이어지는 구간을 합쳐 길이만 더한다(겹친 시간 이중계산 방지).
+            var totalSec: TimeInterval = 0
+            var curStart = intervals[0].start
+            var curEnd = intervals[0].end
+            for iv in intervals.dropFirst() {
+                if iv.start > curEnd {
+                    totalSec += curEnd.timeIntervalSince(curStart)
+                    curStart = iv.start
+                    curEnd = iv.end
+                } else {
+                    curEnd = max(curEnd, iv.end)
+                }
             }
+            totalSec += curEnd.timeIntervalSince(curStart)
+            let mins = Int(totalSec / 60)
+            return mins > 0 ? mins : nil
         }
-        totalSec += curEnd.timeIntervalSince(curStart)
-        let mins = Int(totalSec / 60)
-        return mins > 0 ? mins : nil
+        return (asleep: unionMinutes([1, 3, 4, 5]), inBed: unionMinutes([0]))
     }
 
     /// iOS 수면(raw) — sleepAnalysis 샘플 1건 = 단계 조각 1행(각 uuid). 병합 없이 그대로 전달하고, 세션 합성·정규화는 서버가 한다.
     /// 단계값은 애플 원시 분류(HKCategoryValueSleepAnalysis) 그대로: in_bed/asleep_unspecified/awake/asleep_core/asleep_deep/asleep_rem.
+    /// 조회 창 정책: 밤잠이 자정을 걸치므로 호출자는 수면을 36h 창으로 조회한다(종료시각 누락 방지). 다른 타입은 24h.
     private func buildSleepStageRecord(_ sample: HKSample, tz: String) -> HealthRecord? {
         guard let s = sample as? HKCategorySample,
               let stage = Self.sleepStageString(s.value) else { return nil }
@@ -313,8 +320,8 @@ final class HealthKitClient: @unchecked Sendable {
         // total = active + basal (둘 중 하나만 있으면 그것만, 둘 다 nil 이면 nil)
         let totalKcal: Double? = (activeKcal == nil && basalKcal == nil) ? nil : (activeKcal ?? 0) + (basalKcal ?? 0)
 
-        // 수면시간 = asleep* interval union(§1-5, awake·inBed 제외) — 병합 세션 span 이 아니라 애플 건강 "수면"과 같은 정의.
-        let sleepDuration = await querySleepMinutesUnion(since: dayStart, to: dayEnd)
+        // 수면시간(asleep* union)·취침시간(in_bed union) — 애플 건강 "수면"/"취침 시간"과 같은 정의.
+        let sleep = await querySleepSummaryMinutes(since: dayStart, to: dayEnd)
 
         let exerciseSessions = await queryEndedExerciseSessions(since: dayStart, to: dayEnd)
         let exerciseCount = exerciseSessions.isEmpty ? nil : exerciseSessions.count
@@ -326,7 +333,7 @@ final class HealthKitClient: @unchecked Sendable {
 
         // 요약이 담는 지표가 전부 nil 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
         if hr.avg == nil && st == nil && totalKcal == nil && exTimeMin == nil && dist == nil
-            && sleepDuration == nil && exerciseCount == nil {
+            && sleep.asleep == nil && sleep.inBed == nil && exerciseCount == nil {
             return nil
         }
 
@@ -342,7 +349,8 @@ final class HealthKitClient: @unchecked Sendable {
             caloriesActiveTotal: activeKcal,
             activeTimeTotal: exTimeMin.map { Int($0) },
             distanceTotal: dist,
-            sleepDuration: sleepDuration,
+            sleepDuration: sleep.asleep,
+            inBedDuration: sleep.inBed,
             exerciseCount: exerciseCount,
             exerciseTotalMin: exerciseTotalMin,
             exerciseTotalCalories: exerciseTotalCalories
@@ -1068,6 +1076,7 @@ final class HealthKitClient: @unchecked Sendable {
         let activeTimeTotal: Int?           // appleExerciseTime 분 합
         let distanceTotal: Double?
         let sleepDuration: Int?
+        let inBedDuration: Int?
         let exerciseCount: Int?
         let exerciseTotalMin: Int?
         let exerciseTotalCalories: Double?
