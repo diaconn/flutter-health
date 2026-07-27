@@ -129,12 +129,27 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     }
   }
 
+  /// Daily Summary 조회 대상일. 기본은 어제이고, 날짜 버튼으로 과거 임의 날짜를 고를 수 있다.
+  DateTime _dailyDate = DateTime.now().subtract(const Duration(days: 1));
+
+  static String _dateOnly(DateTime d) => d.toIso8601String().substring(0, 10);
+
+  Future<void> _pickDailyDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dailyDate,
+      firstDate: now.subtract(const Duration(days: 365)),
+      lastDate: now,
+    );
+    if (picked != null) setState(() => _dailyDate = picked);
+  }
+
   Future<void> _queryDaily() async {
-    final yesterday = DateTime.now().subtract(const Duration(days: 1));
     try {
-      final record = await _plugin.queryDailySummary(yesterday);
+      final record = await _plugin.queryDailySummary(_dailyDate);
       _log(
-        'queryDailySummary [${yesterday.toIso8601String().substring(0, 10)}]\n${record == null ? 'null' : _prettyRecord(record)}',
+        'queryDailySummary [${_dateOnly(_dailyDate)}]\n${record == null ? 'null' : _prettyRecord(record)}',
       );
     } catch (e) {
       _log('queryDailySummary error: $e');
@@ -374,6 +389,8 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
                 onQueryInterval: _queryInterval,
                 onQueryHourly: _queryHourly,
                 onQueryDaily: _queryDaily,
+                dailyDateLabel: _dateOnly(_dailyDate),
+                onPickDailyDate: _pickDailyDate,
                 onToggleLoop: _toggleLoop,
                 onQueryChanges: _queryChanges,
               ),
@@ -447,7 +464,8 @@ class _StatusBar extends StatelessWidget {
 class _ButtonGrid extends StatelessWidget {
   final bool loopRunning;
   final VoidCallback onConnect, onRequestPermission;
-  final VoidCallback onQueryHourly, onQueryDaily, onToggleLoop;
+  final VoidCallback onQueryHourly, onQueryDaily, onToggleLoop, onPickDailyDate;
+  final String dailyDateLabel;
   final Future<void> Function(String) onQueryInterval, onQueryChanges;
 
   const _ButtonGrid({
@@ -457,6 +475,8 @@ class _ButtonGrid extends StatelessWidget {
     required this.onQueryInterval,
     required this.onQueryHourly,
     required this.onQueryDaily,
+    required this.dailyDateLabel,
+    required this.onPickDailyDate,
     required this.onToggleLoop,
     required this.onQueryChanges,
   });
@@ -510,7 +530,12 @@ class _ButtonGrid extends StatelessWidget {
             ),
             OutlinedButton(
               onPressed: onQueryDaily,
-              child: const Text('Daily Summary (어제)'),
+              child: Text('Daily Summary ($dailyDateLabel)'),
+            ),
+            OutlinedButton.icon(
+              onPressed: onPickDailyDate,
+              icon: const Icon(Icons.calendar_today, size: 16),
+              label: const Text('날짜 변경'),
             ),
           ]),
           // 수면·운동·영양은 변경 피드(신규+수정+삭제)로 조회 — 한 버튼으로 추가/편집/삭제 모두 확인.
