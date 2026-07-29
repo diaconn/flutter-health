@@ -3,12 +3,10 @@ import 'dart:convert';
 import 'blood_glucose_value.dart';
 import 'blood_pressure_value.dart';
 import 'calories_interval_value.dart';
-import 'daily_summary_value.dart';
 import 'distance_interval_value.dart';
 import 'exercise_value.dart';
 import 'heart_rate_interval_value.dart';
 import 'height_value.dart';
-import 'hourly_summary_value.dart';
 import 'nutrition_value.dart';
 import 'sleep_value.dart';
 import 'steps_interval_value.dart';
@@ -22,8 +20,6 @@ class HealthRecord {
   static const String typeCaloriesInterval = 'calories_interval';
   static const String typeSleep = 'sleep';
   static const String typeExercise = 'exercise';
-  static const String typeHourlySummary = 'hourly_summary';
-  static const String typeDailySummary = 'daily_summary';
   static const String typeWeight = 'weight';
   // 체성분 — iOS 는 항목별 독립 타입(원천 1:1). Android 는 body_composition 한 행에 번들(현행 유지).
   static const String typeBmi = 'bmi';
@@ -70,8 +66,6 @@ class HealthRecord {
   CaloriesIntervalValue? get asCaloriesInterval => dataType == typeCaloriesInterval ? CaloriesIntervalValue.fromJson(_decoded()) : null;
   SleepValue? get asSleep => dataType == typeSleep ? SleepValue.fromJson(_decoded()) : null;
   ExerciseValue? get asExercise => dataType == typeExercise ? ExerciseValue.fromJson(_decoded()) : null;
-  HourlySummaryValue? get asHourlySummary => dataType == typeHourlySummary ? HourlySummaryValue.fromJson(_decoded()) : null;
-  DailySummaryValue? get asDailySummary => dataType == typeDailySummary ? DailySummaryValue.fromJson(_decoded()) : null;
   WeightValue? get asWeight => dataType == typeWeight ? WeightValue.fromJson(_decoded()) : null;
   BloodGlucoseValue? get asBloodGlucose => dataType == typeBloodGlucose ? BloodGlucoseValue.fromJson(_decoded()) : null;
   BloodPressureValue? get asBloodPressure => dataType == typeBloodPressure ? BloodPressureValue.fromJson(_decoded()) : null;

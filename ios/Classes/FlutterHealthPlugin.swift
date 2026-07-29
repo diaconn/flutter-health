@@ -61,26 +61,6 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
                 }
             }
 
-        case "queryHourlySummary":
-            guard let args      = call.arguments as? [String: Any],
-                  let startMs   = args["hourStart"] as? Int,
-                  let endMs     = args["hourEnd"]   as? Int else {
-                result(FlutterError(code: "INVALID_ARGS", message: "hourStart/hourEnd required", details: nil))
-                return
-            }
-            let hourStart = Date(timeIntervalSince1970: Double(startMs) / 1000.0)
-            let hourEnd   = Date(timeIntervalSince1970: Double(endMs)   / 1000.0)
-            Task {
-                do {
-                    let record = try await client.queryHourlySummary(from: hourStart, to: hourEnd)
-                    DispatchQueue.main.async { result(record?.toDictionary()) }
-                } catch {
-                    DispatchQueue.main.async {
-                        result(FlutterError(code: "HK_ERROR", message: error.localizedDescription, details: nil))
-                    }
-                }
-            }
-
         case "queryWeights":
             guard let args = call.arguments as? [String: Any],
                   let sinceMs = args["since"] as? Int,
@@ -93,30 +73,6 @@ public class FlutterHealthPlugin: NSObject, FlutterPlugin {
             Task {
                 let records = await client.queryWeights(since: since, to: to)
                 DispatchQueue.main.async { result(records.map { $0.toDictionary() }) }
-            }
-
-        case "queryDailySummary":
-            guard let args    = call.arguments as? [String: Any],
-                  let dateStr = args["date"] as? String else {
-                result(FlutterError(code: "INVALID_ARGS", message: "date required", details: nil))
-                return
-            }
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            formatter.timeZone = TimeZone.current
-            guard let date = formatter.date(from: dateStr) else {
-                result(FlutterError(code: "INVALID_ARGS", message: "date format must be yyyy-MM-dd", details: nil))
-                return
-            }
-            Task {
-                do {
-                    let record = try await client.queryDailySummary(date: date)
-                    DispatchQueue.main.async { result(record?.toDictionary()) }
-                } catch {
-                    DispatchQueue.main.async {
-                        result(FlutterError(code: "HK_ERROR", message: error.localizedDescription, details: nil))
-                    }
-                }
             }
 
         case "queryHeartRate", "querySteps", "queryDistance", "queryCalories",

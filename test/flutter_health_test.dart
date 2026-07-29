@@ -44,15 +44,6 @@ class MockFlutterHealthPlatform
       Future.value([]);
 
   @override
-  Future<HealthRecord?> queryHourlySummary(
-          DateTime hourStart, DateTime hourEnd) =>
-      Future.value(null);
-
-  @override
-  Future<HealthRecord?> queryDailySummary(DateTime date) =>
-      Future.value(null);
-
-  @override
   Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) =>
       Future.value([]);
 

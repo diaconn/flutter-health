@@ -88,10 +88,16 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     }
   }
 
+  /// 조회 창 — 실제 앱과 같은 정책이다. 수면만 36시간(자정을 걸친 밤이 잘리지 않게), 나머지는 24시간.
+  (DateTime, DateTime) _window({bool sleep = false}) {
+    final to = DateTime.now();
+    return (to.subtract(Duration(hours: sleep ? 36 : 24)), to);
+  }
+
   /// 10분 격자 버킷 타입들(heart_rate_interval·steps_interval·distance_interval·calories_interval).
-  /// 버튼은 선택일 하루치, 10분 루프는 실시간 최근 1h 를 조회한다(닫힌 칸만 반환).
+  /// 버튼은 최근 24h, 10분 루프는 최근 1h 를 조회한다(닫힌 칸만 반환).
   Future<void> _queryInterval(String name, {(DateTime, DateTime)? window}) async {
-    final (since, to) = window ?? _dayWindow();
+    final (since, to) = window ?? _window();
     try {
       final records = switch (name) {
         'heart_rate_interval' => await _plugin.queryHeartRate(since, to),
@@ -125,79 +131,12 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
     }
   }
 
-  Future<void> _queryHourly() async {
-    final (dayStart, _) = _dayWindow();
-    final hourStart = dayStart.add(Duration(hours: DateTime.now().hour)); // 고른 날짜에서 지금과 같은 시각의 1시간만 확인
-    final hourEnd = hourStart.add(const Duration(hours: 1));
-    try {
-      final record = await _plugin.queryHourlySummary(hourStart, hourEnd);
-      _log(
-        'queryHourlySummary [${_fmt(hourStart)}]\n${record == null ? 'null' : _prettyRecord(record)}',
-      );
-    } catch (e) {
-      _log('queryHourlySummary error: $e');
-    }
-  }
-
-  DateTime _selectedDate = DateTime.now().subtract(const Duration(days: 1)); // 조회할 날짜. 모든 버튼이 이 날짜 0시~다음날 0시를 본다(10분 루프만 실시간)
-
-  static String _dateOnly(DateTime d) => d.toIso8601String().substring(0, 10);
-
-  /// daily_summary 는 하루가 끝나야 만들어지므로 어제 이전만 조회한다. 오늘을 고르면 버튼이 잠긴다.
-  bool get _dailySelectable {
-    final now = DateTime.now();
-    final picked = DateTime(
-      _selectedDate.year,
-      _selectedDate.month,
-      _selectedDate.day,
-    );
-    return picked.isBefore(DateTime(now.year, now.month, now.day));
-  }
-
-  /// 선택일의 하루 창(로컬).
-  (DateTime, DateTime) _dayWindow() {
-    final start = DateTime(
-      _selectedDate.year,
-      _selectedDate.month,
-      _selectedDate.day,
-    );
-    return (start, start.add(const Duration(days: 1)));
-  }
-
-  Future<void> _pickDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: now.subtract(const Duration(days: 365)),
-      lastDate: now,
-    );
-    if (picked != null) {
-      setState(() {
-        _selectedDate = picked;
-        _changeTokens.clear(); // 날짜가 바뀌면 변경 피드 기준선 초기화
-      });
-    }
-  }
-
-  Future<void> _queryDaily() async {
-    try {
-      final record = await _plugin.queryDailySummary(_selectedDate);
-      _log(
-        'queryDailySummary [${_dateOnly(_selectedDate)}]\n${record == null ? 'null' : _prettyRecord(record)}',
-      );
-    } catch (e) {
-      _log('queryDailySummary error: $e');
-    }
-  }
-
   /// 변경 피드 조회 — 한 버튼으로 신규 추가·수정·삭제를 확인. `upserted`(신규·수정) + `deletedUids`(삭제·구버전).
   /// - iOS: 저장된 anchor(token) 기준 델타(최초 호출은 전량이 기준선).
   /// - Android: 변경시각 창을 매번 재스캔(별도 기준선 불필요).
-  /// 창은 선택일 하루([00:00, 다음날 00:00)). 날짜를 바꾸면 token 이 초기화돼 새 기준선부터 시작.
-  /// 이 데모는 날짜별로 비교하기 쉽게 하루 단위로만 조회한다. 실제 앱은 수면 36시간·나머지 24시간을 거슬러 조회한다.
+  /// 창은 실제 앱과 같다 — 수면 36시간, 나머지 24시간.
   Future<void> _queryChanges(String dataType) async {
-    final (since, to) = _dayWindow();
+    final (since, to) = _window(sleep: dataType == 'sleep');
     try {
       final res = await _plugin.queryChanges(
         dataType,
@@ -328,8 +267,9 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
   String _sleepLine(HealthRecord r) {
     final v = r.asSleep;
     final durMin = (r.endTimestamp - r.timestamp) ~/ 60000;
-    if (v == null)
+    if (v == null) {
       return '  sleep ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}';
+    }
     if (v.stage != null) {
       // iOS: sleepAnalysis 조각 1개 = 단계 1개.
       return '  [iOS 조각] ${v.stage}  ${durMin}m  ${_fmtMs(r.timestamp)}–${_fmtMs(r.endTimestamp)}  uid=${r.uid ?? '-'}';
@@ -411,8 +351,6 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
             permitted: _permitted,
           ),
           const Divider(height: 1),
-          // 최상단 조회일 — 모든 섹션이 이 날짜를 공유한다.
-          _DateBar(dateLabel: _dateOnly(_selectedDate), onPick: _pickDate),
           const Divider(height: 1),
           // 버튼 영역: 최대 화면 42% 까지만 차지하고 그 이상은 자체 스크롤.
           ConstrainedBox(
@@ -425,9 +363,6 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
                 onConnect: _connect,
                 onRequestPermission: _requestPermission,
                 onQueryInterval: _queryInterval,
-                onQueryHourly: _queryHourly,
-                onQueryDaily: _queryDaily,
-                dailySelectable: _dailySelectable,
                 onToggleLoop: _toggleLoop,
                 onQueryChanges: _queryChanges,
               ),
@@ -497,52 +432,19 @@ class _StatusBar extends StatelessWidget {
 }
 
 /// 최상단 조회일 바 — 모든 섹션이 공유하는 날짜 하나를 고른다.
-class _DateBar extends StatelessWidget {
-  final String dateLabel;
-  final VoidCallback onPick;
-
-  const _DateBar({required this.dateLabel, required this.onPick});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Row(
-        children: [
-          const Icon(Icons.calendar_today, size: 16),
-          const SizedBox(width: 8),
-          const Text('조회일', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(width: 8),
-          Text(dateLabel),
-          const Spacer(),
-          FilledButton.tonalIcon(
-            onPressed: onPick,
-            icon: const Icon(Icons.edit_calendar, size: 16),
-            label: const Text('날짜 변경'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// 플러그인은 공통(Android + iOS) 기능만 노출한다. (전용 기능은 SDK에서 제거됨)
 /// 인슐린 투여·투여약은 iOS 전용 구현이라 버튼명에 (iOS) 표기.
 class _ButtonGrid extends StatelessWidget {
   final bool loopRunning;
-  final bool dailySelectable; // 선택일이 어제 이전일 때만 Daily Summary 조회 가능
   final VoidCallback onConnect, onRequestPermission;
-  final VoidCallback onQueryHourly, onQueryDaily, onToggleLoop;
+  final VoidCallback onToggleLoop;
   final Future<void> Function(String) onQueryInterval, onQueryChanges;
 
   const _ButtonGrid({
     required this.loopRunning,
-    required this.dailySelectable,
     required this.onConnect,
     required this.onRequestPermission,
     required this.onQueryInterval,
-    required this.onQueryHourly,
-    required this.onQueryDaily,
     required this.onToggleLoop,
     required this.onQueryChanges,
   });
@@ -574,86 +476,71 @@ class _ButtonGrid extends StatelessWidget {
           _section('10분 격자 지표', [
             OutlinedButton(
               onPressed: () => onQueryInterval('heart_rate_interval'),
-              child: const Text('심박수 (선택일)'),
+              child: const Text('심박수 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryInterval('steps_interval'),
-              child: const Text('걸음 수 (선택일)'),
+              child: const Text('걸음 수 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryInterval('distance_interval'),
-              child: const Text('이동 거리 (선택일)'),
+              child: const Text('이동 거리 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryInterval('calories_interval'),
-              child: const Text('소비 칼로리 (선택일)'),
-            ),
-          ]),
-          _section('요약', [
-            OutlinedButton(
-              onPressed: onQueryHourly,
-              child: const Text('Hourly Summary (선택일 · 시간별)'),
-            ),
-            // 하루가 끝나야 만들어지는 값이라 오늘은 잠근다.
-            OutlinedButton(
-              onPressed: dailySelectable ? onQueryDaily : null,
-              child: Text(
-                dailySelectable
-                    ? 'Daily Summary (선택일)'
-                    : 'Daily Summary (어제 이전만)',
-              ),
+              child: const Text('소비 칼로리 (최근 24h)'),
             ),
           ]),
           // 수면·운동·영양은 변경 피드(신규+수정+삭제)로 조회 — 한 버튼으로 추가/편집/삭제 모두 확인.
           _section('수면·운동·영양', [
             OutlinedButton(
               onPressed: () => onQueryChanges('sleep'),
-              child: const Text('수면 단계 raw (선택일)'),
+              child: const Text('수면 단계 raw (최근 36h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('exercise'),
-              child: const Text('운동 (선택일)'),
+              child: const Text('운동 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('nutrition'),
-              child: const Text('영양 (선택일)'),
+              child: const Text('영양 (최근 24h)'),
             ),
           ]),
           // 체성분·키·인슐린도 변경 피드로 조회 — 삭제 델타까지 검증. iOS 기준(Android 는 번들/프로필).
           _section('신체·체성분', [
             OutlinedButton(
               onPressed: () => onQueryChanges('weight'),
-              child: const Text('체중 (선택일)'),
+              child: const Text('체중 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('bmi'),
-              child: const Text('체질량지수 (선택일)'),
+              child: const Text('체질량지수 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('body_fat_percentage'),
-              child: const Text('체지방률 (선택일)'),
+              child: const Text('체지방률 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('height'),
-              child: const Text('키 (선택일·iOS)'),
+              child: const Text('키 (최근 24h·iOS)'),
             ),
           ]),
           _section('대사·혈액', [
             OutlinedButton(
               onPressed: () => onQueryChanges('blood_glucose'),
-              child: const Text('혈당 (선택일)'),
+              child: const Text('혈당 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('blood_pressure'),
-              child: const Text('혈압 (선택일)'),
+              child: const Text('혈압 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('water_intake'),
-              child: const Text('물 섭취 (선택일)'),
+              child: const Text('물 섭취 (최근 24h)'),
             ),
             OutlinedButton(
               onPressed: () => onQueryChanges('insulin_delivery'),
-              child: const Text('인슐린 투여 (선택일·iOS)'),
+              child: const Text('인슐린 투여 (최근 24h·iOS)'),
             ),
           ]),
           const SizedBox(height: 8),

@@ -20,9 +20,6 @@ void main() {
           return false;
         case 'requestPermission':
           return true;
-        case 'queryHourlySummary':
-        case 'queryDailySummary':
-          return null;
         case 'queryHeartRate':
         case 'querySteps':
         case 'queryEndedExerciseSessions':

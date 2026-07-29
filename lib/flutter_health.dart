@@ -6,8 +6,6 @@ export 'src/models/distance_interval_value.dart';
 export 'src/models/calories_interval_value.dart';
 export 'src/models/sleep_value.dart';
 export 'src/models/exercise_value.dart';
-export 'src/models/hourly_summary_value.dart';
-export 'src/models/daily_summary_value.dart';
 export 'src/models/weight_value.dart';
 export 'src/models/blood_glucose_value.dart';
 export 'src/models/blood_pressure_value.dart';
@@ -57,14 +55,6 @@ class FlutterHealth {
   /// [since]~[to] 구간에 종료된 운동 세션 목록을 반환.
   Future<List<HealthRecord>> queryEndedExerciseSessions(DateTime since, DateTime to) =>
       FlutterHealthPlatform.instance.queryEndedExerciseSessions(since, to);
-
-  /// [hourStart]~[hourEnd] 구간의 시간별 집계 (hourly_summary) 레코드를 반환.
-  Future<HealthRecord?> queryHourlySummary(DateTime hourStart, DateTime hourEnd) =>
-      FlutterHealthPlatform.instance.queryHourlySummary(hourStart, hourEnd);
-
-  /// [date] 하루의 일별 집계 (daily_summary) 레코드를 반환.
-  Future<HealthRecord?> queryDailySummary(DateTime date) =>
-      FlutterHealthPlatform.instance.queryDailySummary(date);
 
   /// [since]~[to] 구간 내 모든 체중 (weight) 측정 목록을 최신순(timestamp 내림차순)으로 반환.
   Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) =>

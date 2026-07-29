@@ -14,7 +14,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 
 class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
@@ -87,19 +86,6 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }
             }
-            "queryHourlySummary" -> {
-                val hourStart = call.argument<Number>("hourStart")?.toLong()
-                val hourEnd = call.argument<Number>("hourEnd")?.toLong()
-                if (hourStart == null || hourEnd == null) {
-                    result.error("INVALID_ARGS", "hourStart and hourEnd are required", null)
-                    return
-                }
-                scope.launch {
-                    runCatching { client.queryHourlySummary(hourStart, hourEnd)?.toMap() }
-                        .onSuccess { result.success(it) }
-                        .onFailure { result.error("QUERY_ERROR", it.message, null) }
-                }
-            }
             "queryWeights" -> {
                 val since = call.argument<Number>("since")?.toLong()
                 val to = call.argument<Number>("to")?.toLong()
@@ -109,23 +95,6 @@ class FlutterHealthPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
                 scope.launch {
                     runCatching { client.queryWeights(since, to).map { it.toMap() } }
-                        .onSuccess { result.success(it) }
-                        .onFailure { result.error("QUERY_ERROR", it.message, null) }
-                }
-            }
-            "queryDailySummary" -> {
-                val isoDate = call.argument<String>("date")
-                if (isoDate == null) {
-                    result.error("INVALID_ARGS", "date is required", null)
-                    return
-                }
-                val date = runCatching { LocalDate.parse(isoDate) }.getOrNull()
-                if (date == null) {
-                    result.error("INVALID_ARGS", "date must be ISO local date (yyyy-MM-dd)", null)
-                    return
-                }
-                scope.launch {
-                    runCatching { client.queryDailySummary(date)?.toMap() }
                         .onSuccess { result.success(it) }
                         .onFailure { result.error("QUERY_ERROR", it.message, null) }
                 }

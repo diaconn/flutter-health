@@ -18,12 +18,9 @@ import com.samsung.android.sdk.health.data.request.AggregateRequest
 import com.samsung.android.sdk.health.data.request.DataType
 import com.samsung.android.sdk.health.data.request.DataTypes
 import com.samsung.android.sdk.health.data.request.InstantTimeFilter
-import com.samsung.android.sdk.health.data.request.LocalDateFilter
 import com.samsung.android.sdk.health.data.request.LocalTimeFilter
 import com.samsung.android.sdk.health.data.request.LocalTimeGroup
 import com.samsung.android.sdk.health.data.request.LocalTimeGroupUnit
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -34,7 +31,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 class SamsungHealthClient(private val context: Context) {
 
@@ -155,7 +151,6 @@ class SamsungHealthClient(private val context: Context) {
 
     /**
      * 활동 소비 칼로리를 **벽시계 10분 격자 버킷**별 합(calories_interval, active=활동 소비, kcal)으로 반환한다.
-     * 기초대사 포함 총소비는 하루가 지나야 확정되므로 daily_summary 에만 둔다.
      */
     suspend fun queryCalories(since: Long, to: Long): List<HealthRecord> {
         val s = store ?: return emptyList()
@@ -169,85 +164,8 @@ class SamsungHealthClient(private val context: Context) {
         }.sortedByDescending { it.timestamp }
     }
 
-    /** 하루의 수면시간·취침시간(분). 서버와 같은 방식이다.
-     *  삼성은 잠 하나가 기록 한 건으로 나뉘어 오므로, 기록 한 건을 잠 한 번으로 센다(iOS 처럼 다시 묶지 않는다).
-     *  - 수면시간 = 기록마다 (처음~끝 − awake)을 더한 값. 중간에 단계가 없는 구간은 잤다고 본다.
-     *    단계 기록이 없으면 삼성이 주는 DURATION 을 쓰고, 그 값도 없으면 0.
-     *  - 취침시간 = 기록의 처음~끝 구간을 합친 값. 삼성은 in_bed 단계가 없어 기록 구간이 그 시간이다.
-     *  겹친 구간은 한 번만 센다. */
-    suspend fun querySleepSummaryMinutes(since: Long, to: Long): Pair<Int?, Int?> {
-        val s = store ?: return null to null
-        return runCatching {
-            val sinceLocal = since.toLocalDateTime().minusDays(1) // 밤잠은 자정을 넘기니까 하루 앞부터 가져온 뒤, 끝난 시각이 오늘 안인 기록만 센다
-            val toLocal = to.toLocalDateTime()
-            val filter = LocalTimeFilter.of(sinceLocal, toLocal)
-            val request = DataTypes.SLEEP.readDataRequestBuilder.setLocalTimeFilter(filter).build()
-            var sleepMin = 0
-            val spans = mutableListOf<Pair<Long, Long>>()
-            for (p in s.readData(request).dataList) {
-                val startMs = p.startTime?.toEpochMilli() ?: continue
-                val endMs = p.endTime?.toEpochMilli() ?: continue
-                if (endMs < since || endMs >= to) continue
-                spans += startMs to endMs
-                val stages = runCatching {
-                    p.getValue(DataType.SleepType.SESSIONS)?.flatMap { it.stages.orEmpty() }
-                }.getOrNull().orEmpty()
-                sleepMin += if (stages.isEmpty()) {
-                    val durationMs = runCatching { p.getValue(DataType.SleepType.DURATION)?.toMillis() }.getOrNull()
-                    ((durationMs ?: 0L) / 60000L).toInt()
-                } else {
-                    val awakeMs = stages // awake 는 그냥 더한다. 삼성은 시간이 겹치는 단계 입력을 막아 두 번 빠질 일이 없다
-                        .filter { it.stage.name.lowercase() == STAGE_AWAKE }
-                        .sumOf { (it.endTime.toEpochMilli() - it.startTime.toEpochMilli()).coerceAtLeast(0L) }
-                    (((endMs - startMs) - awakeMs) / 60000L).toInt()
-                }
-            }
-            sleepMin.takeIf { it > 0 } to unionMs(spans).toMinutesOrNull()
-        }.onFailure { Log.e(TAG, "수면 요약 계산 실패", it) }.getOrNull() ?: (null to null)
-    }
-
-    /** 밀리초를 분으로 바꾼다. 0 분이면 null 을 준다(요약에서는 "데이터 없음"과 같게 다룬다). */
+    /** 밀리초를 분으로 바꾼다. 0 분이면 null 을 준다("데이터 없음"과 같게 다룬다). */
     private fun Long.toMinutesOrNull(): Int? = (this / 60000L).toInt().takeIf { it > 0 }
-
-    /** 시간 구간들을 합쳐서 전체 길이를 구한다. 겹치거나 맞닿은 부분은 한 번만 센다.
-     *  폰과 워치가 같은 시간을 각각 기록하면 그냥 더하면 두 배가 되므로 이렇게 합친다.
-     *  반환 단위는 넣은 값과 같다(밀리초를 넣으면 밀리초, 분을 넣으면 분). */
-    private fun unionMs(intervals: List<Pair<Long, Long>>): Long {
-        if (intervals.isEmpty()) return 0L
-        val sorted = intervals.sortedBy { it.first }
-        var total = 0L
-        var curStart = sorted[0].first
-        var curEnd = sorted[0].second
-        for (iv in sorted.drop(1)) {
-            if (iv.first > curEnd) {
-                total += curEnd - curStart
-                curStart = iv.first
-                curEnd = iv.second
-            } else {
-                curEnd = maxOf(curEnd, iv.second)
-            }
-        }
-        return total + (curEnd - curStart)
-    }
-
-    /**
-     * 하루 운동 요약(개수·시간·칼로리). 애플 건강 앱과 같은 방식으로 센다.
-     * - 개수와 칼로리는 기록 그대로 센다. 워치와 다른 앱이 같은 운동을 각각 기록하면 2개로 나온다.
-     * - 시간만 겹친 부분을 한 번만 센다. 겹친 기록이 전부 그대로 오는데 그냥 더하면 실제 시계보다 시간이 늘어나기 때문이다.
-     * 서버로 보내는 원본 운동 기록은 건드리지 않고, 이 요약 숫자에만 적용한다. iOS 도 같은 규칙이다.
-     */
-    private fun summarizeExercise(sessions: List<HealthRecord>): Triple<Int?, Int?, Double?> {
-        if (sessions.isEmpty()) return Triple(null, null, null)
-        val minuteSlots = sessions.map { r -> // 각 운동을 "시작한 분부터 몇 분간"으로 바꿔 합치면 겹친 분은 한 번만 남는다
-            val startMin = r.timestamp / 60000L
-            startMin to startMin + (r.endTimestamp - r.timestamp) / 60000L
-        }
-        val mins = unionMs(minuteSlots).toInt() // 넣은 단위가 분이라 그대로 분이다
-        val kcals = sessions.mapNotNull {
-            runCatching { json.decodeFromString<ExerciseValue>(it.valueJson).calories }.getOrNull()
-        }
-        return Triple(sessions.size, mins.takeIf { it > 0 }, kcals.takeIf { it.isNotEmpty() }?.sum())
-    }
 
     /** [since]~[to] 구간에 종료된 운동 세션 목록을 반환한다. */
     suspend fun queryEndedExerciseSessions(since: Long, to: Long): List<HealthRecord> {
@@ -262,125 +180,6 @@ class SamsungHealthClient(private val context: Context) {
                 .filter { it.endTimestamp in since..to }
                 .sortedByDescending { it.timestamp }
         }.onFailure { Log.e(TAG, "운동 세션 조회 실패", it) }.getOrDefault(emptyList())
-    }
-
-    /**
-     * [hourStartMs]~[hourEndMs] 구간의 시간별 집계를 반환한다.
-     * 데이터가 없으면 null 반환.
-     */
-    suspend fun queryHourlySummary(hourStartMs: Long, hourEndMs: Long): HealthRecord? = coroutineScope {
-        val s = store ?: return@coroutineScope null
-        val zone = ZoneId.systemDefault()
-        val localFilter = LocalTimeFilter.of(hourStartMs.toLocalDateTime(), hourEndMs.toLocalDateTime())
-        val instantFilter = InstantTimeFilter.of(Instant.ofEpochMilli(hourStartMs), Instant.ofEpochMilli(hourEndMs))
-
-        val hrD = async { readHeartRateStats(s, instantFilter) }
-        val stD = async { aggregateSteps(s, localFilter) }
-        val caaD = async { aggregateActiveCalories(s, localFilter) }
-        val atD = async { aggregateActiveTime(s, localFilter) }
-        val diD = async { aggregateDistance(s, localFilter) }
-
-        val hrStats = hrD.await()
-        val stepsTotal = stD.await()
-        val caloriesActiveTotal = caaD.await()
-        val activeTimeTotal = atD.await()
-        val distanceTotal = diD.await()
-
-        // 요약이 담는 지표가 전부 null 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
-        if (hrStats.avg == null && stepsTotal == null &&
-            caloriesActiveTotal == null && activeTimeTotal == null && distanceTotal == null) {
-            return@coroutineScope null
-        }
-
-        val hourLabel = Instant.ofEpochMilli(hourStartMs)
-            .atZone(zone)
-            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH"))
-
-        HealthRecord(
-            dataType = DATA_TYPE_HOURLY_SUMMARY,
-            timestamp = hourStartMs,
-            endTimestamp = hourEndMs - 1,
-            tzOffset = currentTzOffset(),
-            source = SOURCE,
-            valueJson = json.encodeToString(HourlySummaryValue(
-                hour = hourLabel,
-                heartRateAvg = hrStats.avg,
-                heartRateMin = hrStats.min,
-                heartRateMax = hrStats.max,
-                stepsTotal = stepsTotal,
-                caloriesActiveTotal = caloriesActiveTotal,
-                activeTimeTotal = activeTimeTotal,
-                distanceTotal = distanceTotal
-            )),
-            createdAt = System.currentTimeMillis(),
-        )
-    }
-
-    /**
-     * [date] 하루 전체의 일별 집계를 반환한다.
-     * 데이터가 없으면 null 반환.
-     */
-    suspend fun queryDailySummary(date: LocalDate): HealthRecord? = coroutineScope {
-        val s = store ?: return@coroutineScope null
-        val zone = ZoneId.systemDefault()
-        val dayStartMs = date.atStartOfDay(zone).toInstant().toEpochMilli()
-        val dayEndMs = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
-        val localFilter = LocalTimeFilter.of(dayStartMs.toLocalDateTime(), dayEndMs.toLocalDateTime())
-        val instantFilter = InstantTimeFilter.of(Instant.ofEpochMilli(dayStartMs), Instant.ofEpochMilli(dayEndMs))
-
-        val hrD = async { readHeartRateStats(s, instantFilter) }
-        val stD = async { aggregateSteps(s, localFilter) }
-        val caD = async { aggregateCalories(s, localFilter) }
-        val caaD = async { aggregateActiveCalories(s, localFilter) }
-        val atD = async { aggregateActiveTime(s, localFilter) }
-        val diD = async { aggregateDistance(s, localFilter) }
-        val sleepD = async { querySleepSummaryMinutes(dayStartMs, dayEndMs) }
-        val exerciseD = async { queryEndedExerciseSessions(dayStartMs, dayEndMs) }
-
-        val hrStats = hrD.await()
-        val stepsTotal = stD.await()
-        val caloriesTotal = caD.await()
-        val caloriesActiveTotal = caaD.await()
-        val activeTimeTotal = atD.await()
-        val distanceTotal = diD.await()
-        // 잠든 시간·누워 있던 시간 — iOS 와 같은 뜻이다.
-        val (sleepDuration, inBedDuration) = sleepD.await()
-        val exerciseSessions = exerciseD.await()
-
-        // 개수는 기록 그대로, 시간만 겹친 부분을 한 번만 센다(요약 숫자만. 원본 기록은 그대로 보낸다).
-        val (exerciseCount, exerciseTotalMin, exerciseTotalCalories) = summarizeExercise(exerciseSessions)
-
-        // 요약이 담는 지표가 전부 null 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
-        if (hrStats.avg == null && stepsTotal == null && caloriesTotal == null &&
-            caloriesActiveTotal == null && activeTimeTotal == null && distanceTotal == null &&
-            sleepDuration == null && inBedDuration == null && exerciseCount == null) {
-            return@coroutineScope null
-        }
-
-        HealthRecord(
-            dataType = DATA_TYPE_DAILY_SUMMARY,
-            timestamp = dayStartMs,
-            endTimestamp = dayEndMs,
-            tzOffset = currentTzOffset(),
-            source = SOURCE,
-            valueJson = json.encodeToString(DailySummaryValue(
-                date = date.format(DateTimeFormatter.ISO_LOCAL_DATE),
-                heartRateAvg = hrStats.avg,
-                heartRateMin = hrStats.min,
-                heartRateMax = hrStats.max,
-                stepsTotal = stepsTotal,
-                caloriesTotal = caloriesTotal,
-                caloriesActiveTotal = caloriesActiveTotal,
-                activeTimeTotal = activeTimeTotal,
-                distanceTotal = distanceTotal,
-                sleepDuration = sleepDuration,
-                inBedDuration = inBedDuration,
-                exerciseCount = exerciseCount,
-                exerciseTotalMin = exerciseTotalMin,
-                exerciseTotalCalories = exerciseTotalCalories
-            )),
-            createdAt = System.currentTimeMillis(),
-        )
     }
 
     /**
@@ -691,28 +490,6 @@ class SamsungHealthClient(private val context: Context) {
     private fun Long.toLocalDateTime(): LocalDateTime =
         Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault()).toLocalDateTime()
 
-    private data class HrStats(val avg: Int?, val min: Int?, val max: Int?)
-
-    private suspend fun readHeartRateStats(s: HealthDataStore, filter: InstantTimeFilter): HrStats =
-        runCatching {
-            val request = DataTypes.HEART_RATE.readDataRequestBuilder.setInstantTimeFilter(filter).build()
-            val values = s.readData(request).dataList
-                .map { it.getValueOrDefault(DataType.HeartRateType.HEART_RATE, 0f) }
-                .filter { it > 0f }
-            if (values.isEmpty()) HrStats(null, null, null)
-            else HrStats(
-                avg = (values.sum() / values.size).toInt().takeIf { it > 0 },
-                min = values.min().toInt().takeIf { it > 0 },
-                max = values.max().toInt().takeIf { it > 0 }
-            )
-        }.onFailure { Log.e(TAG, "심박수 조회 실패", it) }.getOrDefault(HrStats(null, null, null))
-
-    private suspend fun aggregateSteps(s: HealthDataStore, filter: LocalTimeFilter): Int? =
-        runCatching {
-            val request = DataType.StepsType.TOTAL.requestBuilder.setLocalTimeFilter(filter).build()
-            s.aggregateData(request).dataList.firstOrNull()?.value?.toInt()?.takeIf { it > 0 }
-        }.onFailure { Log.e(TAG, "걸음수 집계 실패", it) }.getOrDefault(null)
-
     /**
      * since 를 BUCKET_MS 격자 경계로 내려 [그 경계, to] 를 LocalTimeGroup(MINUTELY×BUCKET_MIN) 으로 그룹 집계한다.
      * **완료된(닫힌) 칸만**(start+BUCKET_MS <= to) 반환해 진행 중인 마지막 부분 칸을 제외한다.
@@ -737,32 +514,6 @@ class SamsungHealthClient(private val context: Context) {
                     .filter { it.startTime.toEpochMilli() + BUCKET_MS <= to } // 완료된(닫힌) 칸만
             }
         }.onFailure { Log.e(TAG, "$logTag 격자 집계 실패", it) }.getOrDefault(emptyList())
-
-    private suspend fun aggregateActivityFloat(
-        s: HealthDataStore,
-        op: AggregateOperation<Float, AggregateRequest.LocalTimeBuilder<Float>>,
-        filter: LocalTimeFilter,
-        logTag: String
-    ): Double? =
-        runCatching {
-            s.aggregateData(op.requestBuilder.setLocalTimeFilter(filter).build())
-                .dataList.firstOrNull()?.value?.let { v -> if (v > 0f) v.toDouble() else null }
-        }.onFailure { Log.e(TAG, "$logTag 집계 실패", it) }.getOrDefault(null)
-
-    private suspend fun aggregateCalories(s: HealthDataStore, filter: LocalTimeFilter): Double? =
-        aggregateActivityFloat(s, DataType.ActivitySummaryType.TOTAL_CALORIES_BURNED, filter, "칼로리")
-
-    private suspend fun aggregateDistance(s: HealthDataStore, filter: LocalTimeFilter): Double? =
-        aggregateActivityFloat(s, DataType.ActivitySummaryType.TOTAL_DISTANCE, filter, "이동 거리")
-
-    private suspend fun aggregateActiveCalories(s: HealthDataStore, filter: LocalTimeFilter): Double? =
-        aggregateActivityFloat(s, DataType.ActivitySummaryType.TOTAL_ACTIVE_CALORIES_BURNED, filter, "활동 칼로리")
-
-    private suspend fun aggregateActiveTime(s: HealthDataStore, filter: LocalTimeFilter): Int? =
-        runCatching {
-            s.aggregateData(DataType.ActivitySummaryType.TOTAL_ACTIVE_TIME.requestBuilder.setLocalTimeFilter(filter).build())
-                .dataList.firstOrNull()?.value?.toMillis()?.div(60000L)?.toInt()?.takeIf { it > 0 }
-        }.onFailure { Log.e(TAG, "활동 시간 집계 실패", it) }.getOrDefault(null)
 
     /** Nutrition 의 Float Field 추출 헬퍼 — 19개 필드에 반복되어 헬퍼가 정당. */
     private fun nf(point: HealthDataPoint, field: com.samsung.android.sdk.health.data.data.Field<Float>): Double? =
@@ -935,7 +686,6 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class CaloriesIntervalValue(val active: Double)
 
-
     @Serializable
     private data class SleepStageEntry(
         val stage: String,       // 삼성 raw 단계: light/deep/rem/awake/undefined (정규화는 서버)
@@ -961,40 +711,10 @@ class SamsungHealthClient(private val context: Context) {
     )
 
     @Serializable
-    private data class HourlySummaryValue(
-        val hour: String,
-        val heartRateAvg: Int?,
-        val heartRateMin: Int?,
-        val heartRateMax: Int?,
-        val stepsTotal: Int?,
-        val caloriesActiveTotal: Double?,
-        val activeTimeTotal: Int?,
-        val distanceTotal: Double?
-    )
-
-    @Serializable
     private data class WeightValue(
         val weight: Double,
         val bmi: Double?,
         val bodyFat: Double?
-    )
-
-    @Serializable
-    private data class DailySummaryValue(
-        val date: String,
-        val heartRateAvg: Int?,
-        val heartRateMin: Int?,
-        val heartRateMax: Int?,
-        val stepsTotal: Int?,
-        val caloriesTotal: Double?,
-        val caloriesActiveTotal: Double?,
-        val activeTimeTotal: Int?,
-        val distanceTotal: Double?,
-        val sleepDuration: Int?,
-        val inBedDuration: Int?,
-        val exerciseCount: Int?,
-        val exerciseTotalMin: Int?,
-        val exerciseTotalCalories: Double?
     )
 
     @Serializable
@@ -1044,7 +764,6 @@ class SamsungHealthClient(private val context: Context) {
     @Serializable
     private data class WaterIntakeValue(val amount: Double)
 
-
     @Serializable
     private data class HeightValue(val height: Double)
 
@@ -1064,8 +783,6 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_CALORIES_INTERVAL = "calories_interval"
         const val DATA_TYPE_SLEEP = "sleep"
         const val DATA_TYPE_EXERCISE = "exercise"
-        const val DATA_TYPE_HOURLY_SUMMARY = "hourly_summary"
-        const val DATA_TYPE_DAILY_SUMMARY = "daily_summary"
         const val DATA_TYPE_WEIGHT = "weight"
         const val DATA_TYPE_BLOOD_GLUCOSE = "blood_glucose"
         const val DATA_TYPE_BLOOD_PRESSURE = "blood_pressure"

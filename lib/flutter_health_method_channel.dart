@@ -49,22 +49,6 @@ class MethodChannelFlutterHealth extends FlutterHealthPlatform {
       _queryList('queryEndedExerciseSessions', since, to);
 
   @override
-  Future<HealthRecord?> queryHourlySummary(DateTime hourStart, DateTime hourEnd) async {
-    final result = await methodChannel.invokeMethod<Map>('queryHourlySummary', {
-      'hourStart': hourStart.millisecondsSinceEpoch,
-      'hourEnd': hourEnd.millisecondsSinceEpoch,
-    });
-    return result == null ? null : HealthRecord.fromMap(result);
-  }
-
-  @override
-  Future<HealthRecord?> queryDailySummary(DateTime date) async {
-    final result = await methodChannel.invokeMethod<Map>(
-        'queryDailySummary', {'date': date.toIso8601String().substring(0, 10)});
-    return result == null ? null : HealthRecord.fromMap(result);
-  }
-
-  @override
   Future<List<HealthRecord>> queryWeights(DateTime since, DateTime to) =>
       _queryList('queryWeights', since, to);
 

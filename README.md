@@ -103,8 +103,6 @@ for (final r in beats) {
 | `queryCalories(since, to)` | 소비 칼로리 — 벽시계 10분 격자 버킷(total/active, kcal) 합 목록. 완료된 칸만 |
 | `queryStepsDaily(date)` | 당일 누적 걸음 수(count) 1건 — 자정~수집 시점 누적 |
 | `queryEndedExerciseSessions(since, to)` | 구간 내 종료된 운동 세션 목록 |
-| `queryHourlySummary(hourStart, hourEnd)` | 1시간 집계 (HR·걸음·칼로리·거리) |
-| `queryDailySummary(date)` | 1일 집계 (HR·걸음·칼로리·거리·수면·운동) |
 | `queryWeights(since, to)` | 구간 내 모든 체중 측정 목록 최신순 (weight·BMI·체지방률) |
 
 > 모든 list 반환 쿼리(`queryWeights`, `queryBloodGlucose` 등)는 **최신순(timestamp 내림차순)** 으로 정렬되어 반환됩니다.
@@ -117,7 +115,7 @@ for (final r in beats) {
 
 ```dart
 class HealthRecord {
-  final String dataType;    // "heart_rate_interval" | "steps_interval" | "distance_interval" | "calories_interval" | "steps_daily" | "sleep" | "exercise" | "hourly_summary" | "daily_summary" | "weight" ...
+  final String dataType;    // "heart_rate_interval" | "steps_interval" | "distance_interval" | "calories_interval" | "steps_daily" | "sleep" | "exercise" | "weight" ...
   final int timestamp;      // UTC epoch ms (구간 시작)
   final int endTimestamp;   // UTC epoch ms (구간 종료)
   final String tzOffset;    // "+09:00" 형식
@@ -137,8 +135,6 @@ record.asCaloriesInterval  // CaloriesIntervalValue?
 record.asStepsDaily        // StepsDailyValue?
 record.asSleep             // SleepValue?
 record.asExercise       // ExerciseValue?
-record.asHourlySummary  // HourlySummaryValue?
-record.asDailySummary   // DailySummaryValue?
 record.asWeight         // WeightValue?
 ```
 
@@ -181,34 +177,6 @@ Future<void> _collect() async {
   ]);
   final records = results.expand((r) => r).toList();
   // 서버 전송 또는 로컬 DB 저장
-}
-```
-
-### 시간별·일별 요약 트리거 조건
-
-```dart
-// 매 사이클에서 호출
-Future<void> _checkSummaries() async {
-  final now = DateTime.now();
-
-  // 시간별: 매 시간 5분 이후, 아직 저장되지 않은 경우
-  if (now.minute >= 5) {
-    final prevHourStart = DateTime(now.year, now.month, now.day, now.hour - 1);
-    final prevHourEnd   = prevHourStart.add(const Duration(hours: 1));
-    if (!await _hourlySummaryExists(prevHourStart)) {
-      final r = await health.queryHourlySummary(prevHourStart, prevHourEnd);
-      if (r != null) await _saveAndSync(r);
-    }
-  }
-
-  // 일별: 새벽 4시 이후, 전날 요약이 없는 경우
-  if (now.hour >= 4) {
-    final yesterday = DateTime(now.year, now.month, now.day - 1);
-    if (!await _dailySummaryExists(yesterday)) {
-      final r = await health.queryDailySummary(yesterday);
-      if (r != null) await _saveAndSync(r);
-    }
-  }
 }
 ```
 
