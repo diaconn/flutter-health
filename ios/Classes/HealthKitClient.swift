@@ -124,16 +124,67 @@ final class HealthKitClient: @unchecked Sendable {
         }
     }
 
-    /// [일 요약 지표] 하루 "수면시간(분)"과 "취침시간(분)"을 계산한다.
-    /// - 수면시간 = 잠든 단계(unspecified·core·deep·rem) 구간의 합집합(union). 침대(in_bed)·각성(awake) 제외 → 애플 건강 "수면"과 동일.
-    /// - 취침시간 = in_bed 구간의 합집합 → 애플 건강 "취침 시간"과 동일.
-    /// 폰(in_bed)·워치(단계)가 같은 시간을 겹쳐 기록하므로 단순 합산이 아니라 union 으로 겹친 구간을 한 번만 센다.
-    /// ※ 수면은 CategoryType 이라 HKStatisticsQuery 로 집계가 안 됨 → 직접 union 하는 게 유일한 방법.
-    /// ※ 요약용 "숫자" 계산일 뿐, 서버로 보내는 raw 단계 레코드(전 단계)와는 별개다.
+    /// 구간들을 합친 전체 길이. 겹친 부분은 한 번만 센다(폰·워치가 같은 시간을 각각 기록해도 두 배가 안 되게).
+    /// 사이가 [bridgeGapMs] 보다 벌어지면 따로 센다. 단위는 넣은 값과 같다.
+    private static func mergedSpanMs(_ intervals: [(start: Int64, end: Int64)], bridgeGapMs: Int64 = 0) -> Int64 {
+        guard !intervals.isEmpty else { return 0 }
+        let sorted = intervals.sorted { $0.start < $1.start }
+        var total: Int64 = 0
+        var curStart = sorted[0].start
+        var curEnd = sorted[0].end
+        for iv in sorted.dropFirst() {
+            if iv.start - curEnd > bridgeGapMs {
+                total += curEnd - curStart
+                curStart = iv.start
+                curEnd = iv.end
+            } else {
+                curEnd = max(curEnd, iv.end)
+            }
+        }
+        return total + (curEnd - curStart)
+    }
+
+    private static let sleepStageInBed = 0 // 애플 단계 번호 — 0 in_bed / 1 asleep_unspecified / 2 awake / 3 asleep_core / 4 asleep_deep / 5 asleep_rem
+    private static let sleepStageAwake = 2
+    private static let sleepSessionGapMs: Int64 = 60 * 60_000 // 이만큼 벌어지면 다른 잠으로 본다. 서버도 같은 값이라 한쪽만 바꾸면 안 맞는다
+
+    private struct SleepFragment { // 수면 기록 한 조각. 이 조각들을 모아 하나의 잠으로 묶는다
+        let start: Int64
+        let end: Int64
+        let stage: Int
+    }
+
+    /// 수면 조각을 한 번의 잠끼리 묶는다(1시간 넘게 벌어지면 다른 잠).
+    /// in_bed 도 같이 묶어서, 폰의 긴 in_bed 가 워치 단계 두 뭉치를 이어 주면 한 잠이 된다.
+    private static func sleepSessions(_ fragments: [SleepFragment]) -> [[SleepFragment]] {
+        let valid = fragments.filter { $0.end > $0.start }.sorted { $0.start < $1.start }
+        guard !valid.isEmpty else { return [] }
+        var sessions: [[SleepFragment]] = []
+        var cur: [SleepFragment] = []
+        var curEnd = Int64.min
+        for f in valid {
+            if !cur.isEmpty, f.start - curEnd > sleepSessionGapMs {
+                sessions.append(cur)
+                cur = []
+                curEnd = Int64.min
+            }
+            cur.append(f)
+            curEnd = max(curEnd, f.end)
+        }
+        sessions.append(cur)
+        return sessions
+    }
+
+    /// 하루의 수면시간·취침시간(분). 서버와 같은 방식이다. 기록을 한 번의 잠끼리 묶은 뒤:
+    /// - 수면시간 = 잠의 처음~끝에서 awake 만 뺀 값. 중간에 기록이 빈 구간은 잤다고 본다(애플 건강 앱과 같음).
+    /// - 처음~끝은 단계 기록으로만 정한다. in_bed 는 잠을 이어 주기만 하고 구간을 넓히지 않는다.
+    ///   단계 기록이 없는 밤(폰만 쓴 경우)은 in_bed 가 곧 수면시간.
+    /// - 취침시간 = in_bed 구간을 합친 값.
+    /// 자정을 넘긴 밤은 자르지 않고 잠이 끝난 날에 전체를 넣는다. 겹친 구간은 한 번만 센다.
+    /// 수면은 애플이 합계를 안 줘서 직접 계산한다. 요약 숫자 전용이고 원본 기록은 따로 보낸다.
     private func querySleepSummaryMinutes(since: Date, to: Date) async -> (asleep: Int?, inBed: Int?) {
         guard HKObjectType.categoryType(forIdentifier: .sleepAnalysis) != nil else { return (nil, nil) }
-        // 밤잠이 자정을 걸치므로 하루 앞당겨 조회한 뒤, 종료가 요청 창(since~to) 안인 조각만 센다.
-        let fetchSince = Calendar.current.date(byAdding: .day, value: -1, to: since) ?? since
+        let fetchSince = Calendar.current.date(byAdding: .day, value: -1, to: since) ?? since // 밤잠은 자정을 넘기니까 하루 앞부터 가져온다(잠이 잘리지 않게)
         let predicate = HKQuery.predicateForSamples(withStart: fetchSince, end: to, options: .strictEndDate)
         let descriptor = HKSampleQueryDescriptor(
             predicates: [.categorySample(type: HKCategoryType(.sleepAnalysis), predicate: predicate)],
@@ -142,31 +193,25 @@ final class HealthKitClient: @unchecked Sendable {
         guard let samples = try? await descriptor.result(for: store) else { return (nil, nil) }
         let sinceMs = toMs(since)
         let toMsBound = toMs(to)
-        // 주어진 단계값 집합의 구간 union(분). 종료가 요청 창 안인 것만. rawValue: in_bed 0 / unspecified 1 / core 3 / deep 4 / rem 5.
-        func unionMinutes(_ values: Set<Int>) -> Int? {
-            let intervals = samples
-                .filter { values.contains($0.value) && toMs($0.endDate) >= sinceMs && toMs($0.endDate) <= toMsBound }
-                .map { (start: $0.startDate, end: $0.endDate) }
-                .sorted { $0.start < $1.start }
-            guard !intervals.isEmpty else { return nil }
-            // interval union — 겹치거나 이어지는 구간을 합쳐 길이만 더한다(겹친 시간 이중계산 방지).
-            var totalSec: TimeInterval = 0
-            var curStart = intervals[0].start
-            var curEnd = intervals[0].end
-            for iv in intervals.dropFirst() {
-                if iv.start > curEnd {
-                    totalSec += curEnd.timeIntervalSince(curStart)
-                    curStart = iv.start
-                    curEnd = iv.end
-                } else {
-                    curEnd = max(curEnd, iv.end)
-                }
+
+        var asleepMin = 0
+        var inBedMin = 0
+        let fragments = samples.map { SleepFragment(start: toMs($0.startDate), end: toMs($0.endDate), stage: $0.value) }
+        for session in Self.sleepSessions(fragments) {
+            let stages = session.filter { $0.stage != Self.sleepStageInBed } // in_bed 를 뺀 나머지가 단계 기록(awake·모르는 값 포함)
+            let inBedUnion = Self.mergedSpanMs(session.filter { $0.stage == Self.sleepStageInBed }.map { (start: $0.start, end: $0.end) })
+            guard let spanStart = stages.map(\.start).min(), let spanEnd = stages.map(\.end).max() else {
+                guard let end = session.map(\.end).max(), end >= sinceMs, end < toMsBound else { continue } // 단계 기록이 없고 in_bed 만 있는 밤 — 그 시간이 수면시간이자 취침시간
+                asleepMin += Int(inBedUnion / 60_000)
+                inBedMin += Int(inBedUnion / 60_000)
+                continue
             }
-            totalSec += curEnd.timeIntervalSince(curStart)
-            let mins = Int(totalSec / 60)
-            return mins > 0 ? mins : nil
+            guard spanEnd >= sinceMs, spanEnd < toMsBound else { continue } // 잠이 끝난 시각이 오늘 안일 때만 오늘로 센다
+            let awakeUnion = Self.mergedSpanMs(stages.filter { $0.stage == Self.sleepStageAwake }.map { (start: $0.start, end: $0.end) })
+            asleepMin += Int(((spanEnd - spanStart) - awakeUnion) / 60_000) // 서버도 잠 하나씩 분으로 버린 뒤 더한다
+            inBedMin += Int(inBedUnion / 60_000)
         }
-        return (asleep: unionMinutes([1, 3, 4, 5]), inBed: unionMinutes([0]))
+        return (asleep: asleepMin > 0 ? asleepMin : nil, inBed: inBedMin > 0 ? inBedMin : nil)
     }
 
     /// iOS 수면(raw) — sleepAnalysis 샘플 1건 = 단계 조각 1행(각 uuid). 병합 없이 그대로 전달하고, 세션 합성·정규화는 서버가 한다.
@@ -217,54 +262,21 @@ final class HealthKitClient: @unchecked Sendable {
         return records
     }
 
-    /// 요약(daily_summary)용 운동 집계 — 시간이 겹치는 세션을 한 건으로 묶어 센다.
-    /// 워치가 기록한 운동과 같은 시간대에 수동 입력·다른 앱 기록이 겹쳐 들어오면 건강 앱은 하나로 보여주는데,
-    /// workout 은 통계 쿼리가 없어 조회하면 겹친 것이 전부 그대로 온다. 그대로 더하면 개수·시간·칼로리가 부풀려진다.
-    /// 붙어 있기만 한 세션(앞 끝 == 뒤 시작)은 서로 다른 운동이므로 합치지 않는다.
-    /// raw 운동 레코드에는 손대지 않고 요약 숫자에만 적용한다.
+    /// 하루 운동 요약(개수·시간·칼로리). 애플 건강 앱과 같은 방식으로 센다.
+    /// - 개수와 칼로리는 기록 그대로 센다. 워치와 다른 앱이 같은 운동을 각각 기록하면 2개로 나온다.
+    ///   애플 건강 앱도 겹친 운동을 각각 한 줄로 보여준다.
+    /// - 시간만 겹친 부분을 한 번만 센다. 운동은 애플이 합계를 내주지 않아 겹친 기록이 전부 그대로 오는데,
+    ///   그냥 더하면 실제 시계보다 시간이 늘어나기 때문이다.
+    /// 서버로 보내는 원본 운동 기록은 건드리지 않고, 이 요약 숫자에만 적용한다. Android 도 같은 규칙이다.
     private func summarizeExercise(_ sessions: [HealthRecord]) -> (count: Int?, totalMin: Int?, totalCalories: Double?) {
         guard !sessions.isEmpty else { return (nil, nil, nil) }
-        func caloriesOf(_ r: HealthRecord) -> Double? {
-            return (try? jsonDecoder.decode(ExerciseValue.self, from: Data(r.valueJson.utf8)))?.calories
+        let minuteSlots = sessions.map { r -> (start: Int64, end: Int64) in // 각 운동을 "시작한 분부터 몇 분간"으로 바꿔 합치면 겹친 분은 한 번만 남는다
+            let startMin = r.timestamp / 60_000
+            return (start: startMin, end: startMin + (r.endTimestamp - r.timestamp) / 60_000)
         }
-        let sorted = sessions.sorted { $0.timestamp < $1.timestamp }
-
-        var count = 0
-        var totalMs: Int64 = 0
-        var kcalSum: Double = 0
-        var anyKcal = false
-
-        var curStart = sorted[0].timestamp
-        var curEnd = sorted[0].endTimestamp
-        var curKcal = caloriesOf(sorted[0])
-
-        func flush() {
-            count += 1
-            totalMs += curEnd - curStart
-            if let k = curKcal {
-                kcalSum += k
-                anyKcal = true
-            }
-        }
-
-        for r in sorted.dropFirst() {
-            let kcal = caloriesOf(r)
-            if r.timestamp >= curEnd {
-                flush()
-                curStart = r.timestamp
-                curEnd = r.endTimestamp
-                curKcal = kcal
-            } else {
-                // 겹치면 같은 운동이 두 번 들어온 것으로 보고 하나로 합친다.
-                // 칼로리는 큰 쪽만 남긴다(수동 입력은 비어 있는 경우가 있다).
-                curEnd = max(curEnd, r.endTimestamp)
-                curKcal = [curKcal, kcal].compactMap { $0 }.max()
-            }
-        }
-        flush()
-
-        let mins = Int(totalMs / 60000)
-        return (count, mins > 0 ? mins : nil, anyKcal ? kcalSum : nil)
+        let mins = Int(Self.mergedSpanMs(minuteSlots)) // 넣은 단위가 분이라 그대로 분이다
+        let kcals = sessions.compactMap { (try? jsonDecoder.decode(ExerciseValue.self, from: Data($0.valueJson.utf8)))?.calories }
+        return (sessions.count, mins > 0 ? mins : nil, kcals.isEmpty ? nil : kcals.reduce(0.0, +))
     }
 
     /// HKWorkout → 공통 필드(종목·시간·칼로리·심박·거리)만 추출.
@@ -360,6 +372,9 @@ final class HealthKitClient: @unchecked Sendable {
         async let caloriesBasal = querySumBucketed(.basalEnergyBurned, unit: .kilocalorie(), bucketStart: dayStart, interval: dayInterval)
         async let activeTimeMin = querySumBucketed(.appleExerciseTime, unit: .minute(), bucketStart: dayStart, interval: dayInterval)
         async let distanceTotal = querySumBucketed(.distanceWalkingRunning, unit: .meter(), bucketStart: dayStart, interval: dayInterval)
+        // 수면시간·취침시간 — 애플 건강 앱의 "수면시간"·"취침 시간"과 같은 뜻이다.
+        async let sleepSummary = querySleepSummaryMinutes(since: dayStart, to: dayEnd)
+        async let exerciseQuery = queryEndedExerciseSessions(since: dayStart, to: dayEnd)
 
         let hr = await hrStats
         let st = await stepsTotal
@@ -370,12 +385,9 @@ final class HealthKitClient: @unchecked Sendable {
         // total = active + basal (둘 중 하나만 있으면 그것만, 둘 다 nil 이면 nil)
         let totalKcal: Double? = (activeKcal == nil && basalKcal == nil) ? nil : (activeKcal ?? 0) + (basalKcal ?? 0)
 
-        // 수면시간(asleep* union)·취침시간(in_bed union) — 애플 건강 "수면"/"취침 시간"과 같은 정의.
-        let sleep = await querySleepSummaryMinutes(since: dayStart, to: dayEnd)
-
-        let exerciseSessions = await queryEndedExerciseSessions(since: dayStart, to: dayEnd)
-        // 겹치는 세션은 한 건으로 묶어 센다(요약 전용, raw 는 그대로).
-        let (exerciseCount, exerciseTotalMin, exerciseTotalCalories) = summarizeExercise(exerciseSessions)
+        let sleep = await sleepSummary
+        // 개수는 기록 그대로, 시간만 겹친 부분을 한 번만 센다(요약 숫자만. 원본 기록은 그대로 보낸다).
+        let (exerciseCount, exerciseTotalMin, exerciseTotalCalories) = summarizeExercise(await exerciseQuery)
 
         // 요약이 담는 지표가 전부 nil 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
         if hr.avg == nil && st == nil && totalKcal == nil && exTimeMin == nil && dist == nil
@@ -1069,7 +1081,9 @@ final class HealthKitClient: @unchecked Sendable {
         let heartRateMax: Int?
         let stepsTotal: Int?
         let caloriesActiveTotal: Double?    // active 만
-        let activeTimeTotal: Int?            // appleExerciseTime 분 합
+        // 애플 "운동 시간"(appleExerciseTime) — 빠르게 걷기 이상 강도로 움직인 1분마다 적립되는 값.
+        // 운동으로 기록한 시간과는 다른 값이다.
+        let activeTimeTotal: Int?
         let distanceTotal: Double?
     }
 
@@ -1119,7 +1133,9 @@ final class HealthKitClient: @unchecked Sendable {
         let stepsTotal: Int?
         let caloriesTotal: Double?         // total = basal + active
         let caloriesActiveTotal: Double?   // active 만
-        let activeTimeTotal: Int?           // appleExerciseTime 분 합
+        // 애플 "운동 시간"(appleExerciseTime) — 빠르게 걷기 이상 강도로 움직인 1분마다 적립되는 값.
+        // 운동으로 기록한 시간(exerciseTotalMin)과는 다른 값이다.
+        let activeTimeTotal: Int?
         let distanceTotal: Double?
         let sleepDuration: Int?
         let inBedDuration: Int?

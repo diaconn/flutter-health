@@ -5,7 +5,7 @@ class HourlySummaryValue {
   final int? heartRateMax;
   final int? stepsTotal;
   final double? caloriesActiveTotal; // kcal (활동만, 기초대사 제외)
-  final int? activeTimeTotal; // min
+  final int? activeTimeTotal; // 애플 "운동 시간"(min) — 빠르게 걷기 이상 강도로 움직인 1분마다 적립되는 값, 운동으로 기록한 시간과는 다른 값
   final double? distanceTotal; // m
 
   const HourlySummaryValue({

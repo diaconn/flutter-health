@@ -169,106 +169,84 @@ class SamsungHealthClient(private val context: Context) {
         }.sortedByDescending { it.timestamp }
     }
 
-    /** 하루 수면 요약 분: (수면시간=asleep 단계 union, 취침시간=세션 span union).
-     *  - 수면시간 = asleep 단계(light·deep·rem) 구간 union. awake·undefined 제외 → iOS·애플 "수면"과 정의 일치.
-     *  - 취침시간 = 세션 [start,end] span union. 삼성은 in_bed 단계가 따로 없고 세션 자체가 '침대에 있던 시간'.
-     *  단순 합산이 아니라 union 으로 겹친 구간을 한 번만 센다. */
+    /** 하루의 수면시간·취침시간(분). 서버와 같은 방식이다.
+     *  삼성은 잠 하나가 기록 한 건으로 나뉘어 오므로, 기록 한 건을 잠 한 번으로 센다(iOS 처럼 다시 묶지 않는다).
+     *  - 수면시간 = 기록마다 (처음~끝 − awake)을 더한 값. 중간에 단계가 없는 구간은 잤다고 본다.
+     *    단계 기록이 없으면 삼성이 주는 DURATION 을 쓰고, 그 값도 없으면 0.
+     *  - 취침시간 = 기록의 처음~끝 구간을 합친 값. 삼성은 in_bed 단계가 없어 기록 구간이 그 시간이다.
+     *  겹친 구간은 한 번만 센다. */
     suspend fun querySleepSummaryMinutes(since: Long, to: Long): Pair<Int?, Int?> {
         val s = store ?: return null to null
         return runCatching {
-            // 밤잠이 자정을 걸치므로 하루 앞당겨 조회한 뒤, 종료가 요청 창(since~to) 안인 세션만 센다.
-            val sinceLocal = since.toLocalDateTime().minusDays(1)
+            val sinceLocal = since.toLocalDateTime().minusDays(1) // 밤잠은 자정을 넘기니까 하루 앞부터 가져온 뒤, 끝난 시각이 오늘 안인 기록만 센다
             val toLocal = to.toLocalDateTime()
             val filter = LocalTimeFilter.of(sinceLocal, toLocal)
             val request = DataTypes.SLEEP.readDataRequestBuilder.setLocalTimeFilter(filter).build()
-            val sessions = s.readData(request).dataList
-                .flatMap { p -> runCatching { p.getValue(DataType.SleepType.SESSIONS) }.getOrNull().orEmpty() }
-                .filter { session -> session.endTime.toEpochMilli() in since..to }
-            val asleep = setOf("light", "deep", "rem")
-            // 단계가 없는 세션(수동 입력 등)은 세션 전체를 잠든 시간으로 센다.
-            // 단계를 모를 때 잠든 시간을 0 으로 두면 그 밤의 수면시간이 통째로 비어버린다.
-            // iOS 도 단계 미상 "수면"(asleep_unspecified) 을 그 구간 전체로 세므로 처리가 같아진다.
-            val asleepIntervals = sessions.flatMap { session ->
-                val stages = session.stages.orEmpty()
-                if (stages.isEmpty()) {
-                    listOf(session.startTime.toEpochMilli() to session.endTime.toEpochMilli())
+            var sleepMin = 0
+            val spans = mutableListOf<Pair<Long, Long>>()
+            for (p in s.readData(request).dataList) {
+                val startMs = p.startTime?.toEpochMilli() ?: continue
+                val endMs = p.endTime?.toEpochMilli() ?: continue
+                if (endMs < since || endMs >= to) continue
+                spans += startMs to endMs
+                val stages = runCatching {
+                    p.getValue(DataType.SleepType.SESSIONS)?.flatMap { it.stages.orEmpty() }
+                }.getOrNull().orEmpty()
+                sleepMin += if (stages.isEmpty()) {
+                    val durationMs = runCatching { p.getValue(DataType.SleepType.DURATION)?.toMillis() }.getOrNull()
+                    ((durationMs ?: 0L) / 60000L).toInt()
                 } else {
-                    stages
-                        .filter { it.stage.name.lowercase() in asleep }
-                        .map { it.startTime.toEpochMilli() to it.endTime.toEpochMilli() }
+                    val awakeMs = stages // awake 는 그냥 더한다. 삼성은 시간이 겹치는 단계 입력을 막아 두 번 빠질 일이 없다
+                        .filter { it.stage.name.lowercase() == STAGE_AWAKE }
+                        .sumOf { (it.endTime.toEpochMilli() - it.startTime.toEpochMilli()).coerceAtLeast(0L) }
+                    (((endMs - startMs) - awakeMs) / 60000L).toInt()
                 }
             }
-            val inBedIntervals = sessions
-                .map { it.startTime.toEpochMilli() to it.endTime.toEpochMilli() }
-            unionMinutes(asleepIntervals) to unionMinutes(inBedIntervals)
-        }.onFailure { Log.e(TAG, "수면 union 계산 실패", it) }.getOrNull() ?: (null to null)
+            sleepMin.takeIf { it > 0 } to unionMs(spans).toMinutesOrNull()
+        }.onFailure { Log.e(TAG, "수면 요약 계산 실패", it) }.getOrNull() ?: (null to null)
     }
 
-    /** 구간 목록의 interval union 길이(분). 겹치거나 이어지는 구간은 합쳐 한 번만 센다. 비었으면 null. */
-    private fun unionMinutes(intervals: List<Pair<Long, Long>>): Int? {
-        if (intervals.isEmpty()) return null
+    /** 밀리초를 분으로 바꾼다. 0 분이면 null 을 준다(요약에서는 "데이터 없음"과 같게 다룬다). */
+    private fun Long.toMinutesOrNull(): Int? = (this / 60000L).toInt().takeIf { it > 0 }
+
+    /** 시간 구간들을 합쳐서 전체 길이를 구한다. 겹치거나 맞닿은 부분은 한 번만 센다.
+     *  폰과 워치가 같은 시간을 각각 기록하면 그냥 더하면 두 배가 되므로 이렇게 합친다.
+     *  반환 단위는 넣은 값과 같다(밀리초를 넣으면 밀리초, 분을 넣으면 분). */
+    private fun unionMs(intervals: List<Pair<Long, Long>>): Long {
+        if (intervals.isEmpty()) return 0L
         val sorted = intervals.sortedBy { it.first }
-        var totalMs = 0L
+        var total = 0L
         var curStart = sorted[0].first
         var curEnd = sorted[0].second
         for (iv in sorted.drop(1)) {
             if (iv.first > curEnd) {
-                totalMs += curEnd - curStart
+                total += curEnd - curStart
                 curStart = iv.first
                 curEnd = iv.second
             } else {
                 curEnd = maxOf(curEnd, iv.second)
             }
         }
-        totalMs += curEnd - curStart
-        return (totalMs / 60000L).toInt().takeIf { it > 0 }
+        return total + (curEnd - curStart)
     }
 
     /**
-     * 요약(daily_summary)용 운동 집계 — 시간이 겹치는 세션을 한 건으로 묶어 센다.
-     * 같은 운동이 워치·수동 입력·다른 앱으로 겹쳐 들어오면 그대로 더할 때 개수·시간·칼로리가 부풀려진다.
-     * 붙어 있기만 한 세션(앞 끝 == 뒤 시작)은 서로 다른 운동이므로 합치지 않는다.
-     * raw 운동 레코드에는 손대지 않고 요약 숫자에만 적용한다. iOS 와 같은 규칙.
+     * 하루 운동 요약(개수·시간·칼로리). 애플 건강 앱과 같은 방식으로 센다.
+     * - 개수와 칼로리는 기록 그대로 센다. 워치와 다른 앱이 같은 운동을 각각 기록하면 2개로 나온다.
+     * - 시간만 겹친 부분을 한 번만 센다. 겹친 기록이 전부 그대로 오는데 그냥 더하면 실제 시계보다 시간이 늘어나기 때문이다.
+     * 서버로 보내는 원본 운동 기록은 건드리지 않고, 이 요약 숫자에만 적용한다. iOS 도 같은 규칙이다.
      */
     private fun summarizeExercise(sessions: List<HealthRecord>): Triple<Int?, Int?, Double?> {
         if (sessions.isEmpty()) return Triple(null, null, null)
-        fun caloriesOf(r: HealthRecord): Double? =
-            runCatching { json.decodeFromString<ExerciseValue>(r.valueJson).calories }.getOrNull()
-
-        val sorted = sessions.sortedBy { it.timestamp }
-        var count = 0
-        var totalMs = 0L
-        var kcalSum = 0.0
-        var anyKcal = false
-
-        var curStart = sorted[0].timestamp
-        var curEnd = sorted[0].endTimestamp
-        var curKcal = caloriesOf(sorted[0])
-
-        fun flush() {
-            count++
-            totalMs += curEnd - curStart
-            curKcal?.let { kcalSum += it; anyKcal = true }
+        val minuteSlots = sessions.map { r -> // 각 운동을 "시작한 분부터 몇 분간"으로 바꿔 합치면 겹친 분은 한 번만 남는다
+            val startMin = r.timestamp / 60000L
+            startMin to startMin + (r.endTimestamp - r.timestamp) / 60000L
         }
-
-        for (r in sorted.drop(1)) {
-            val kcal = caloriesOf(r)
-            if (r.timestamp >= curEnd) {
-                flush()
-                curStart = r.timestamp
-                curEnd = r.endTimestamp
-                curKcal = kcal
-            } else {
-                // 겹치면 같은 운동이 두 번 들어온 것으로 보고 하나로 합친다.
-                // 칼로리는 큰 쪽만 남긴다(수동 입력은 비어 있는 경우가 있다).
-                curEnd = maxOf(curEnd, r.endTimestamp)
-                curKcal = listOfNotNull(curKcal, kcal).maxOrNull()
-            }
+        val mins = unionMs(minuteSlots).toInt() // 넣은 단위가 분이라 그대로 분이다
+        val kcals = sessions.mapNotNull {
+            runCatching { json.decodeFromString<ExerciseValue>(it.valueJson).calories }.getOrNull()
         }
-        flush()
-
-        val mins = (totalMs / 60000L).toInt()
-        return Triple(count, mins.takeIf { it > 0 }, if (anyKcal) kcalSum else null)
+        return Triple(sessions.size, mins.takeIf { it > 0 }, kcals.takeIf { it.isNotEmpty() }?.sum())
     }
 
     /** [since]~[to] 구간에 종료된 운동 세션 목록을 반환한다. */
@@ -365,11 +343,11 @@ class SamsungHealthClient(private val context: Context) {
         val caloriesActiveTotal = caaD.await()
         val activeTimeTotal = atD.await()
         val distanceTotal = diD.await()
-        // 수면시간(asleep 단계 union)·취침시간(세션 span union) — iOS·애플과 정의 일치.
+        // 잠든 시간·누워 있던 시간 — iOS 와 같은 뜻이다.
         val (sleepDuration, inBedDuration) = sleepD.await()
         val exerciseSessions = exerciseD.await()
 
-        // 겹치는 세션은 한 건으로 묶어 센다(요약 전용, raw 는 그대로).
+        // 개수는 기록 그대로, 시간만 겹친 부분을 한 번만 센다(요약 숫자만. 원본 기록은 그대로 보낸다).
         val (exerciseCount, exerciseTotalMin, exerciseTotalCalories) = summarizeExercise(exerciseSessions)
 
         // 요약이 담는 지표가 전부 null 이면(빈 봉투) 레코드 미생성 — hourly/daily·양 OS 동일 규칙
@@ -847,7 +825,7 @@ class SamsungHealthClient(private val context: Context) {
             tzOffset = currentTzOffset(),
             source = SOURCE,
             valueJson = json.encodeToString(SleepValue(
-                durationMin = (durationMs / 60000L).toInt().takeIf { it > 0 },
+                durationMin = durationMs.toMinutesOrNull(),
                 stages = stages,
             )),
             createdAt = System.currentTimeMillis(),
@@ -881,7 +859,7 @@ class SamsungHealthClient(private val context: Context) {
             source = SOURCE,
             valueJson = json.encodeToString(ExerciseValue(
                 exerciseType = mapExerciseType(exerciseType),
-                duration = (durationMs / 60000L).toInt().takeIf { it > 0 },
+                duration = durationMs.toMinutesOrNull(),
                 calories = session?.calories?.posOrNull(),
                 distance = session?.distance?.posOrNull(),
                 heartRateAvg = heartRateAvg,
@@ -1095,6 +1073,9 @@ class SamsungHealthClient(private val context: Context) {
         const val DATA_TYPE_WATER_INTAKE = "water_intake"
         const val DATA_TYPE_HEIGHT = "height"
         const val SOURCE = "samsung_health"
+
+        // 삼성이 쓰는 "깨어 있음" 단계 이름(소문자). 원본 기록에 이 값을 그대로 실어 보내므로 바꾸면 안 된다.
+        private const val STAGE_AWAKE = "awake"
 
         // 혈당 단위 변환: Samsung SDK GLUCOSE_LEVEL raw = mmol/L → mg/dL (iOS HealthKit·스키마와 통일).
         // 1 mmol/L = 18.0182 mg/dL.

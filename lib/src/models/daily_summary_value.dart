@@ -5,13 +5,13 @@ class DailySummaryValue {
   final int? heartRateMax;
   final int? stepsTotal;
   final double? caloriesTotal; // kcal (basal + active)
-  final double? caloriesActiveTotal; // kcal
-  final int? activeTimeTotal; // min
+  final double? caloriesActiveTotal; // kcal (active 만)
+  final int? activeTimeTotal; // 애플 "운동 시간"(min) — 빠르게 걷기 이상 강도로 움직인 1분마다 적립되는 값, 운동으로 기록한 시간(exerciseTotalMin)과는 다른 값
   final double? distanceTotal; // m
-  final int? sleepDuration; // min — 수면시간(asleep* union)
-  final int? inBedDuration; // min — 취침시간(in_bed union / Android=세션 span union)
-  final int? exerciseCount;
-  final int? exerciseTotalMin;
+  final int? sleepDuration; // min
+  final int? inBedDuration; // min — 취침시간
+  final int? exerciseCount; // 운동 기록 개수(시간이 겹쳐도 각각 1개로 센다)
+  final int? exerciseTotalMin; // min — 운동한 시간. 겹친 시간은 한 번만 센다
   final double? exerciseTotalCalories;
 
   const DailySummaryValue({
