@@ -143,6 +143,17 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
 
   static String _dateOnly(DateTime d) => d.toIso8601String().substring(0, 10);
 
+  /// daily_summary 는 하루가 끝나야 만들어지므로 어제 이전만 조회한다. 오늘을 고르면 버튼이 잠긴다.
+  bool get _dailySelectable {
+    final now = DateTime.now();
+    final picked = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
+    return picked.isBefore(DateTime(now.year, now.month, now.day));
+  }
+
   /// 선택일의 하루 창(로컬).
   (DateTime, DateTime) _dayWindow() {
     final start = DateTime(
@@ -416,6 +427,7 @@ class _HealthDemoPageState extends State<HealthDemoPage> {
                 onQueryInterval: _queryInterval,
                 onQueryHourly: _queryHourly,
                 onQueryDaily: _queryDaily,
+                dailySelectable: _dailySelectable,
                 onToggleLoop: _toggleLoop,
                 onQueryChanges: _queryChanges,
               ),
@@ -518,12 +530,14 @@ class _DateBar extends StatelessWidget {
 /// 인슐린 투여·투여약은 iOS 전용 구현이라 버튼명에 (iOS) 표기.
 class _ButtonGrid extends StatelessWidget {
   final bool loopRunning;
+  final bool dailySelectable; // 선택일이 어제 이전일 때만 Daily Summary 조회 가능
   final VoidCallback onConnect, onRequestPermission;
   final VoidCallback onQueryHourly, onQueryDaily, onToggleLoop;
   final Future<void> Function(String) onQueryInterval, onQueryChanges;
 
   const _ButtonGrid({
     required this.loopRunning,
+    required this.dailySelectable,
     required this.onConnect,
     required this.onRequestPermission,
     required this.onQueryInterval,
@@ -580,9 +594,14 @@ class _ButtonGrid extends StatelessWidget {
               onPressed: onQueryHourly,
               child: const Text('Hourly Summary (선택일 · 시간별)'),
             ),
+            // 하루가 끝나야 만들어지는 값이라 오늘은 잠근다.
             OutlinedButton(
-              onPressed: onQueryDaily,
-              child: const Text('Daily Summary (선택일)'),
+              onPressed: dailySelectable ? onQueryDaily : null,
+              child: Text(
+                dailySelectable
+                    ? 'Daily Summary (선택일)'
+                    : 'Daily Summary (어제 이전만)',
+              ),
             ),
           ]),
           // 수면·운동·영양은 변경 피드(신규+수정+삭제)로 조회 — 한 버튼으로 추가/편집/삭제 모두 확인.
